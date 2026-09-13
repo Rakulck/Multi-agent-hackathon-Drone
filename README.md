@@ -12,7 +12,7 @@ avoid the same hazard on its next mission.
 ## Links
 
 - [Open the live Vercel app](https://multi-agent-hackathon-drone.vercel.app/)
-- [Watch the demo video](https://drive.google.com/file/d/1O-hj5Xs5UiSPlMNx8eMSzRQPTBB3FKv6/view?usp=sharing)
+- [Watch the demo video](https://drive.google.com/file/d/16IYKa9OLn9sjSL7Egjljxin62i7PcXSJ/view?usp=sharing)
 
 ## Demo walkthrough
 
