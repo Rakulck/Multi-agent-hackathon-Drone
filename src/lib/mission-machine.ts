@@ -1,7 +1,15 @@
+import {
+  activeAirspaceRestrictions,
+  airspacePreferredRoute,
+  airspaceRouteCompliance,
+  airspaceSnapshotMeta,
+} from "@/data/demo-airspace";
 import { apartmentDestination, craneHazard, dispatchOrigin, initialRouteStatuses } from "@/data/demo-routes";
 import { fleetDrones, weatherSnapshotData } from "@/data/demo-dashboard";
 import { buildMissionMapScene, defaultMapScene } from "@/lib/map/route-warp";
 import type {
+  AirspaceEval,
+  AirspaceRouteResult,
   ApprovedPlan,
   ConnectionHealth,
   DeliveryType,
@@ -283,6 +291,7 @@ export const stepTitles: Record<PreflightStepId, string> = {
   REQUEST: "Understand Request",
   FLEET: "Evaluate Fleet",
   WEATHER: "Evaluate Weather",
+  AIRSPACE: "Airspace Compliance",
   MEMORY: "Retrieve Shared Memory",
   ROUTES: "Evaluate Routes",
   APPROVAL: "Check Human Approval",
@@ -325,6 +334,7 @@ export function createMission(input: NewMissionInput): Mission {
     etaDeltaMin: 0,
     routeEval: null,
     selectedRoute: null,
+    airspaceEval: null,
     approvalRequired: false,
     plan: null,
     mapScene: buildMapSceneForInput(input),
@@ -524,7 +534,75 @@ export function buildWeatherStepEvidence(params: {
   };
 }
 
-/** STEP 4 — Retrieve Shared Memory. */
+/** STEP 4 — Airspace Compliance. */
+export function evaluateAirspaceForMission(): AirspaceEval {
+  const routeResults: AirspaceRouteResult[] = (["A", "B", "C"] as RouteId[]).map((id) => {
+    const compliance = airspaceRouteCompliance[id];
+    return {
+      id,
+      name: `Route ${id}`,
+      eligible: compliance.eligible,
+      plannedAglFt: compliance.plannedAglFt,
+      reason: compliance.reason,
+    };
+  });
+
+  const eligible = routeResults.filter((row) => row.eligible).map((row) => row.name);
+  const preferred = airspacePreferredRoute;
+
+  return {
+    airspaceClass: airspaceSnapshotMeta.airspaceClass,
+    maxAltitudeAglFt: airspaceSnapshotMeta.maxAltitudeAglFt,
+    authorizationRequired: airspaceSnapshotMeta.authorizationRequired,
+    laancAuthorized: false,
+    restrictions: activeAirspaceRestrictions.map((restriction) => ({ ...restriction })),
+    routeResults,
+    preferredRoute: preferred,
+    dataSource: airspaceSnapshotMeta.dataSource,
+    timestamp: airspaceSnapshotMeta.updatedAt,
+    facilityMapGrid: airspaceSnapshotMeta.facilityMapGrid,
+    decision: `Route A exceeds the permitted corridor. ${eligible.join(" and ")} remain eligible. Route ${preferred} selected.`,
+  };
+}
+
+export function buildAirspaceStepEvidence(evalResult: AirspaceEval): StepEvidence {
+  const activeRestrictions = evalResult.restrictions.filter((restriction) => restriction.active);
+
+  return {
+    id: "AIRSPACE",
+    title: stepTitles.AIRSPACE,
+    input: [
+      `Airspace status: ${evalResult.airspaceClass}`,
+      `FAA UAS Facility Map grid: ${evalResult.facilityMapGrid}`,
+      `Maximum permitted altitude: ${evalResult.maxAltitudeAglFt} ft AGL`,
+      `Authorization required: ${evalResult.authorizationRequired ? "Yes" : "No"} (mock LAANC — not submitted)`,
+      `Active restrictions: ${activeRestrictions.length}`,
+      `Data source: ${evalResult.dataSource}`,
+      `Timestamp: ${formatTimestampShort(evalResult.timestamp)}`,
+    ],
+    evaluation: [
+      `Controlled vs uncontrolled: ${evalResult.airspaceClass} airspace.`,
+      `UAS Facility Map ceiling: ${evalResult.maxAltitudeAglFt} ft AGL.`,
+      ...activeRestrictions.map(
+        (restriction) => `${restriction.type} ${restriction.id}: ${restriction.label} — ${restriction.detail}`,
+      ),
+      `LAANC authorization required: ${evalResult.authorizationRequired ? "Yes" : "No"}. Real authorization present: No.`,
+      "Corridor labeled as FAA-constrained candidate corridor (not an official authorized route).",
+      ...evalResult.routeResults.map(
+        (row) =>
+          `${row.name}: planned ${row.plannedAglFt} ft AGL — ${row.eligible ? "eligible" : "ineligible"} (${row.reason})`,
+      ),
+    ],
+    decision: evalResult.decision,
+    source: ["FAA UAS Facility Map (public)", "Mock TFR/NOTAM", "Mock LAANC status", "Agent"],
+    status: evalResult.authorizationRequired ? "Warning" : "Completed",
+    summary: `Max ${evalResult.maxAltitudeAglFt} ft AGL. Auth required: ${
+      evalResult.authorizationRequired ? "Yes" : "No"
+    }. Route ${evalResult.preferredRoute} preferred.`,
+  };
+}
+
+/** STEP 5 — Retrieve Shared Memory. */
 export function buildMemoryStepEvidence(memory: OperationalMemory | null): StepEvidence {
   const active = isMemoryActive(memory);
 
@@ -569,15 +647,21 @@ export function buildMemoryStepEvidence(memory: OperationalMemory | null): StepE
   };
 }
 
-/** STEP 5 — Evaluate Routes. */
+/** STEP 6 — Evaluate Routes. */
 const routeBaseStats: Record<RouteId, { distanceKm: number; etaMin: number }> = {
   A: { distanceKm: 2.6, etaMin: 7 },
   B: { distanceKm: 3.4, etaMin: 9 },
   C: { distanceKm: 3.1, etaMin: 8 },
 };
 
-export function evaluateRoutesForMission(memoryBlocksRouteA: boolean): { rows: RouteEvalRow[]; selectedRoute: RouteId } {
-  if (!memoryBlocksRouteA) {
+export function evaluateRoutesForMission(
+  memoryBlocksRouteA: boolean,
+  airspaceEval: AirspaceEval | null = null,
+): { rows: RouteEvalRow[]; selectedRoute: RouteId } {
+  const airspaceBlocksA = Boolean(airspaceEval && !airspaceEval.routeResults.find((row) => row.id === "A")?.eligible);
+  const airspacePreferred = airspaceEval?.preferredRoute ?? null;
+
+  if (!memoryBlocksRouteA && !airspaceBlocksA) {
     const rows: RouteEvalRow[] = [
       {
         id: "A",
@@ -610,24 +694,64 @@ export function evaluateRoutesForMission(memoryBlocksRouteA: boolean): { rows: R
     return { rows, selectedRoute: "A" };
   }
 
+  if (memoryBlocksRouteA) {
+    const rows: RouteEvalRow[] = [
+      {
+        id: "A",
+        name: "Route A",
+        ...routeBaseStats.A,
+        weatherExposure: "Within limits",
+        memoryConflict: "MEM-CRANE-001 active",
+        status: "blocked",
+        reason: airspaceBlocksA
+          ? "Blocked by MEM-CRANE-001 and airspace ceiling / restricted geofence."
+          : "Blocked by MEM-CRANE-001.",
+      },
+      {
+        id: "B",
+        name: "Route B",
+        ...routeBaseStats.B,
+        weatherExposure: "Marginal",
+        memoryConflict: "None",
+        status: "warning",
+        reason: "Warning due to courtyard approach.",
+      },
+      {
+        id: "C",
+        name: "Route C",
+        ...routeBaseStats.C,
+        weatherExposure: "Within limits",
+        memoryConflict: "None",
+        status: "selected",
+        reason: "Selected as safest available route using shared memory.",
+      },
+    ];
+    return { rows, selectedRoute: "C" };
+  }
+
+  // Airspace blocks Route A; no active memory — prefer the FAA-constrained candidate (B).
+  const selectedRoute: RouteId = airspacePreferred && airspacePreferred !== "A" ? airspacePreferred : "B";
   const rows: RouteEvalRow[] = [
     {
       id: "A",
       name: "Route A",
       ...routeBaseStats.A,
       weatherExposure: "Within limits",
-      memoryConflict: "MEM-CRANE-001 active",
+      memoryConflict: "None",
       status: "blocked",
-      reason: "Blocked by MEM-CRANE-001.",
+      reason: "Blocked: exceeds FAA-constrained candidate corridor and UASFM ceiling.",
     },
     {
       id: "B",
       name: "Route B",
       ...routeBaseStats.B,
-      weatherExposure: "Marginal",
+      weatherExposure: "Within limits",
       memoryConflict: "None",
-      status: "warning",
-      reason: "Warning due to courtyard approach.",
+      status: selectedRoute === "B" ? "selected" : "candidate",
+      reason:
+        selectedRoute === "B"
+          ? "Selected: stays inside the FAA-constrained candidate corridor."
+          : "Eligible FAA-constrained candidate corridor.",
     },
     {
       id: "C",
@@ -635,11 +759,14 @@ export function evaluateRoutesForMission(memoryBlocksRouteA: boolean): { rows: R
       ...routeBaseStats.C,
       weatherExposure: "Within limits",
       memoryConflict: "None",
-      status: "selected",
-      reason: "Selected as safest available route using shared memory.",
+      status: selectedRoute === "C" ? "selected" : "candidate",
+      reason:
+        selectedRoute === "C"
+          ? "Selected: stays inside the FAA-constrained candidate corridor."
+          : "Eligible alternate inside the FAA-constrained candidate corridor.",
     },
   ];
-  return { rows, selectedRoute: "C" };
+  return { rows, selectedRoute };
 }
 
 export function buildRoutesStepEvidence(params: {
@@ -647,8 +774,9 @@ export function buildRoutesStepEvidence(params: {
   selectedRoute: RouteId;
   droneModel: string | null;
   memoryBlocksRouteA: boolean;
+  airspaceBlocksRouteA?: boolean;
 }): StepEvidence {
-  const { rows, selectedRoute, droneModel, memoryBlocksRouteA } = params;
+  const { rows, selectedRoute, droneModel, memoryBlocksRouteA, airspaceBlocksRouteA = false } = params;
 
   return {
     id: "ROUTES",
@@ -657,6 +785,9 @@ export function buildRoutesStepEvidence(params: {
       "Three fixed route alternatives (A, B, C).",
       `Selected drone: ${droneModel ?? "pending"}.`,
       "Weather result applied from previous step.",
+      airspaceBlocksRouteA
+        ? "Airspace compliance: Route A exceeds FAA-constrained candidate corridor."
+        : "Airspace compliance: all corridors within published constraints.",
       memoryBlocksRouteA ? "Active obstacle memory: MEM-CRANE-001." : "No active obstacle memories.",
       `Battery reserve requirement: ${BATTERY_RESERVE_PERCENT}%.`,
     ],
@@ -665,15 +796,17 @@ export function buildRoutesStepEvidence(params: {
         `${row.name}: ${row.distanceKm} km, ~${row.etaMin} min, weather ${row.weatherExposure}, memory ${row.memoryConflict} — ${row.status}.`,
     ),
     decision: rows.map((row) => `${row.name} ${row.status}: ${row.reason}`).join(" "),
-    source: ["Google Maps 3D", "Airtable", "Agent"],
+    source: ["Google Maps 3D", "Airtable", "FAA UAS Facility Map (public)", "Agent"],
     status: rows.find((row) => row.id === selectedRoute) ? "Completed" : "Failed",
     summary: memoryBlocksRouteA
       ? `Route C selected using shared memory.`
-      : `Route A selected. Routes B and C retained as fallbacks.`,
+      : airspaceBlocksRouteA
+        ? `Route ${selectedRoute} selected inside the FAA-constrained candidate corridor.`
+        : `Route A selected. Routes B and C retained as fallbacks.`,
   };
 }
 
-/** STEP 6 — Check Human Approval. */
+/** STEP 7 — Check Human Approval. */
 export function isApprovalRequired(rows: RouteEvalRow[] | null): boolean {
   if (!rows) {
     return false;
@@ -708,7 +841,7 @@ export function buildApprovalStepEvidence(required: boolean): StepEvidence {
   };
 }
 
-/** STEP 7 — Build Approved Mission Plan. */
+/** STEP 8 — Build Approved Mission Plan. */
 export function buildApprovedPlan(params: {
   version: 1 | 2;
   droneModel: string;
@@ -725,7 +858,7 @@ export function buildApprovedPlan(params: {
     droneModel: params.droneModel,
     routeId: params.routeId,
     speedMph: params.speedMph,
-    altitudeCorridor: "260-420 ft simulated corridor",
+    altitudeCorridor: "≤200 ft AGL FAA-constrained candidate corridor",
     batteryReserve: `${BATTERY_RESERVE_PERCENT}% minimum reserve`,
     primaryDropOff: params.primaryDropOff,
     backupDropOff: params.backupDropOff,

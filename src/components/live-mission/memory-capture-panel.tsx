@@ -1,13 +1,14 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import type { OperationalMemory } from "@/types/domain";
+import type { GeoPoint3D, OperationalMemory } from "@/types/domain";
 
 interface MemoryCapturePanelProps {
   memory: OperationalMemory;
+  hazardCenter: GeoPoint3D;
 }
 
-export function MemoryCapturePanel({ memory }: MemoryCapturePanelProps) {
+export function MemoryCapturePanel({ memory, hazardCenter }: MemoryCapturePanelProps) {
   return (
     <div className="min-h-0 rounded-[22px] border border-red-200 bg-red-50/60 p-3 shadow-[0_10px_28px_rgba(0,0,0,0.05)]">
       <div className="flex items-center justify-between">
@@ -24,7 +25,7 @@ export function MemoryCapturePanel({ memory }: MemoryCapturePanelProps) {
 
       <div className="mt-2 grid grid-cols-3 gap-x-2 gap-y-1.5 text-[10px] leading-tight text-neutral-700">
         <Field label="Hazard" value={memory.hazardType} />
-        <Field label="Coordinates" value="37.7927, -122.3967" />
+        <Field label="Coordinates" value={`${hazardCenter.lat.toFixed(4)}, ${hazardCenter.lng.toFixed(4)}`} />
         <Field label="Altitude band" value={`${memory.altitudeBandM[0]}-${memory.altitudeBandM[1]}m`} />
         <Field label="Avoid radius" value={`${memory.avoidanceRadiusM}m`} />
         <Field label="Confidence" value={`${Math.round(memory.confidence * 100)}%`} />

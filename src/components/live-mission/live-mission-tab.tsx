@@ -17,6 +17,7 @@ import { HumanInLoopPanel } from "@/components/live-mission/human-in-loop-panel"
 import { ConnectionStatusPanel } from "@/components/live-mission/connection-status-panel";
 import { cn } from "@/lib/utils";
 import type {
+  AirspaceEval,
   ApprovalDecision,
   ApprovalRequest,
   ConnectionState,
@@ -35,6 +36,7 @@ import type {
 
 interface LiveMissionTabProps {
   activeMission: MissionRun | null;
+  airspaceEval: AirspaceEval | null;
   approval: ApprovalRequest | null;
   commandLog: string[];
   connectionState: ConnectionState;
@@ -61,6 +63,7 @@ interface LiveMissionTabProps {
 
 export function LiveMissionTab({
   activeMission,
+  airspaceEval,
   approval,
   commandLog,
   connectionState,
@@ -101,10 +104,12 @@ export function LiveMissionTab({
         : "Evaluating";
   const reroutingBanner = currentStatus === "REROUTING" ? "Rerouting Route A → Route C" : null;
   const showMemory = isMemoryActive(memory) || Boolean(memory && hazardVisible);
+  const airspaceVisible = Boolean(airspaceEval);
 
   return (
     <section className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(0,68fr)_minmax(390px,32fr)]">
       <MapShell
+        airspaceVisible={airspaceVisible}
         routes={routeLegend}
         routeStatuses={routeStatuses}
         selectedRoute={selectedRoute}
@@ -158,7 +163,7 @@ export function LiveMissionTab({
 
         <IntegrationFlowPanel events={integrationEvents} />
 
-        {showMemory && memory ? <MemoryCapturePanel memory={memory} /> : null}
+        {showMemory && memory ? <MemoryCapturePanel hazardCenter={mapScene.hazard.center} memory={memory} /> : null}
 
         <ConnectionStatusPanel connectionState={connectionState} onToggleConnection={onToggleConnection} />
 

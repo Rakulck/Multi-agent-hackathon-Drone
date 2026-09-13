@@ -9,6 +9,7 @@ const stepLabels: Record<PreflightStepId, string> = {
   REQUEST: "Request",
   FLEET: "Fleet",
   WEATHER: "Weather",
+  AIRSPACE: "Airspace",
   MEMORY: "Memory",
   ROUTES: "Routes",
   APPROVAL: "Approval",

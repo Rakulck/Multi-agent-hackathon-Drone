@@ -15,9 +15,15 @@
  * and length, so the whole geometry scales and rotates together no matter
  * how far apart (or in what direction) the real addresses are.
  */
+import {
+  altitudeCeilingAnchor,
+  airspaceSnapshotMeta,
+  permittedOperatingCorridor,
+  restrictedAirspacePolygons,
+} from "@/data/demo-airspace";
 import { alternateDropOffA, alternateDropOffB, altitudeObstacle, secondObstaclePoint } from "@/data/demo-scene";
 import { alternateDropOffZone, apartmentDestination, craneHazard, demoRoutes, dispatchOrigin } from "@/data/demo-routes";
-import type { DemoRoute, DropOffZone, GeoPoint3D, HazardZone, MissionMapScene } from "@/types/domain";
+import type { AirspaceMapOverlay, DemoRoute, DropOffZone, GeoPoint3D, HazardZone, MissionMapScene } from "@/types/domain";
 import type { CameraPresetDefinition, CameraPresetId, Waypoint3D } from "@/types/map";
 
 const EARTH_RADIUS_KM = 6371;
@@ -136,7 +142,28 @@ const referenceAltDropOffBOffset = toLocalOffset(dispatchOrigin, apartmentDestin
   altitude: alternateDropOffB.position.altitudeM,
 });
 
+const referenceRestrictedPolygonOffsets = restrictedAirspacePolygons.map((polygon) =>
+  polygon.map((point) => toLocalOffset(dispatchOrigin, apartmentDestination, point)),
+);
+const referencePermittedCorridorOffsets = permittedOperatingCorridor.map((point) =>
+  toLocalOffset(dispatchOrigin, apartmentDestination, point),
+);
+const referenceAltitudeCeilingOffset = toLocalOffset(dispatchOrigin, apartmentDestination, altitudeCeilingAnchor);
+
 export const secondObstacleAltitudeRangeM: [number, number] = [altitudeObstacle.minAltitudeM, altitudeObstacle.maxAltitudeM];
+
+function buildAirspaceOverlay(origin: GeoPoint3D, destination: GeoPoint3D): AirspaceMapOverlay {
+  return {
+    restrictedPolygons: referenceRestrictedPolygonOffsets.map((offsets) =>
+      offsets.map((offset) => fromLocalOffset(origin, destination, offset)),
+    ),
+    permittedCorridor: referencePermittedCorridorOffsets.map((offset) => fromLocalOffset(origin, destination, offset)),
+    altitudeCeilingAnchor: fromLocalOffset(origin, destination, referenceAltitudeCeilingOffset),
+    maxAltitudeAglFt: airspaceSnapshotMeta.maxAltitudeAglFt,
+    authorizationRequired: airspaceSnapshotMeta.authorizationRequired,
+    corridorLabel: "FAA-constrained candidate corridor",
+  };
+}
 
 /**
  * Builds a full map scene (routes, hazard, obstacles, drop-off zones) for a
@@ -187,6 +214,7 @@ export function buildMissionMapScene(params: {
     alternateDropOffA: fromLocalOffset(origin, destination, referenceAltDropOffAOffset),
     alternateDropOffB: fromLocalOffset(origin, destination, referenceAltDropOffBOffset),
     isCustomAddress,
+    airspace: buildAirspaceOverlay(origin, destination),
   };
 }
 

@@ -9,6 +9,7 @@ import { LiveMissionTab } from "@/components/live-mission/live-mission-tab";
 import {
   BASE_CRUISE_SPEED_MPH,
   appendIntegrationEvent,
+  buildAirspaceStepEvidence,
   buildApprovalStepEvidence,
   buildApprovedPlan,
   buildFleetStepEvidence,
@@ -20,6 +21,7 @@ import {
   createCraneMemory,
   createMission,
   defaultWeatherSnapshot,
+  evaluateAirspaceForMission,
   evaluateFleetForMission,
   evaluateRoutesForMission,
   evaluateWeatherForDrones,
@@ -38,25 +40,26 @@ import {
 } from "@/lib/mission-machine";
 import { defaultMapScene } from "@/lib/map/route-warp";
 import { cn } from "@/lib/utils";
-import type {
-  ApprovalDecision,
-  ApprovalRequest,
-  DemoRoute,
-  FleetDrone,
-  FlightMode,
-  GeoPoint3D,
-  IntegrationEvent,
-  Mission,
-  MissionMapScene,
-  MissionRun,
-  MissionState,
-  NewMissionInput,
-  OperationalMemory,
-  PreflightStepId,
-  RouteId,
-  RouteStatus,
-  StepEvidence,
-  TopTab,
+import {
+  preflightStepOrder,
+  type ApprovalDecision,
+  type ApprovalRequest,
+  type DemoRoute,
+  type FleetDrone,
+  type FlightMode,
+  type GeoPoint3D,
+  type IntegrationEvent,
+  type Mission,
+  type MissionMapScene,
+  type MissionRun,
+  type MissionState,
+  type NewMissionInput,
+  type OperationalMemory,
+  type PreflightStepId,
+  type RouteId,
+  type RouteStatus,
+  type StepEvidence,
+  type TopTab,
 } from "@/types/domain";
 
 const liveEnabledLifecycles: Mission["lifecycle"][] = ["READY", "LAUNCHED", "IN_FLIGHT", "DELIVERED"];
@@ -159,83 +162,126 @@ export function DashboardShell() {
     await wait(620);
   }
 
-  async function runPreflight(missionId: string) {
+  async function advancePreflightStep(missionId: string) {
     if (isRunningPreflight) {
       return;
     }
 
     const mission = missions.find((candidate) => candidate.id === missionId);
 
-    if (!mission || mission.lifecycle !== "NEW") {
+    if (!mission || (mission.lifecycle !== "NEW" && mission.lifecycle !== "PREFLIGHT")) {
+      return;
+    }
+
+    const nextStepId = preflightStepOrder.find((id) => mission.steps[id].status === "Waiting");
+
+    if (!nextStepId) {
       return;
     }
 
     setIsRunningPreflight(true);
-    updateMission(missionId, (current) => ({ ...current, lifecycle: "PREFLIGHT" }));
 
-    await runStep(missionId, "REQUEST", () => buildRequestStepEvidence(mission.input));
-
-    const fleetSnapshot = fleetSnapshotForPreflight(fleet, memory);
-    const fleetRows = evaluateFleetForMission(fleetSnapshot, mission.input.weightKg, mission.input.deliveryType);
-    const provisional = pickProvisionalDrone(fleetRows);
-    await runStep(missionId, "FLEET", () => buildFleetStepEvidence(fleetRows, mission.input.weightKg));
-    updateMission(missionId, (current) => ({
-      ...current,
-      fleetEligibility: fleetRows,
-      provisionalDrone: provisional?.drone.model ?? null,
-    }));
-
-    const weatherResult = evaluateWeatherForDrones(fleetRows, defaultWeatherSnapshot);
-    await runStep(missionId, "WEATHER", () => buildWeatherStepEvidence({ weather: defaultWeatherSnapshot, ...weatherResult }));
-    updateMission(missionId, (current) => ({
-      ...current,
-      confirmedDrone: weatherResult.confirmed?.model ?? null,
-      cruiseSpeedMph: weatherResult.cruiseSpeedMph,
-      etaDeltaMin: weatherResult.etaDeltaMin,
-    }));
-
-    const memoryActive = isMemoryActive(memory);
-    await runStep(missionId, "MEMORY", () => buildMemoryStepEvidence(memory));
-    updateMission(missionId, (current) => ({ ...current, pattern: memoryActive ? "MISSION_2" : "MISSION_1" }));
-
-    const routesResult = evaluateRoutesForMission(memoryActive);
-    await runStep(missionId, "ROUTES", () =>
-      buildRoutesStepEvidence({
-        rows: routesResult.rows,
-        selectedRoute: routesResult.selectedRoute,
-        droneModel: weatherResult.confirmed?.model ?? null,
-        memoryBlocksRouteA: memoryActive,
-      }),
-    );
-    updateMission(missionId, (current) => ({
-      ...current,
-      routeEval: routesResult.rows,
-      selectedRoute: routesResult.selectedRoute,
-    }));
-
-    const approvalRequired = isApprovalRequired(routesResult.rows);
-    await runStep(missionId, "APPROVAL", () => buildApprovalStepEvidence(approvalRequired));
-    updateMission(missionId, (current) => ({ ...current, approvalRequired }));
-
-    if (approvalRequired) {
-      updateMission(missionId, (current) => ({ ...current, lifecycle: "HOLD" }));
-      setIsRunningPreflight(false);
-      return;
+    if (mission.lifecycle === "NEW") {
+      updateMission(missionId, (current) => ({ ...current, lifecycle: "PREFLIGHT" }));
     }
 
-    const plan = buildApprovedPlan({
-      version: 1,
-      droneModel: weatherResult.confirmed?.model ?? "Unassigned",
-      routeId: routesResult.selectedRoute,
-      speedMph: weatherResult.cruiseSpeedMph ?? BASE_CRUISE_SPEED_MPH,
-      primaryDropOff: `${mission.input.dropOffPreference} Zone A`,
-      backupDropOff: memoryActive ? "Alternate courtyard Zone B" : "Route C fallback zone",
-      memoriesUsed: memoryActive && memory ? [memory.id] : [],
-      weatherTimestamp: defaultWeatherSnapshot.updatedAt,
-      approvalStatus: "Autonomous launch approved",
-    });
-    await runStep(missionId, "READY", () => buildReadyStepEvidence(plan));
-    updateMission(missionId, (current) => ({ ...current, plan, lifecycle: "READY" }));
+    switch (nextStepId) {
+      case "REQUEST": {
+        await runStep(missionId, "REQUEST", () => buildRequestStepEvidence(mission.input));
+        break;
+      }
+      case "FLEET": {
+        const fleetSnapshot = fleetSnapshotForPreflight(fleet, memory);
+        const fleetRows = evaluateFleetForMission(fleetSnapshot, mission.input.weightKg, mission.input.deliveryType);
+        const provisional = pickProvisionalDrone(fleetRows);
+        await runStep(missionId, "FLEET", () => buildFleetStepEvidence(fleetRows, mission.input.weightKg));
+        updateMission(missionId, (current) => ({
+          ...current,
+          fleetEligibility: fleetRows,
+          provisionalDrone: provisional?.drone.model ?? null,
+        }));
+        break;
+      }
+      case "WEATHER": {
+        const fleetRows = mission.fleetEligibility ?? [];
+        const weatherResult = evaluateWeatherForDrones(fleetRows, defaultWeatherSnapshot);
+        await runStep(missionId, "WEATHER", () => buildWeatherStepEvidence({ weather: defaultWeatherSnapshot, ...weatherResult }));
+        updateMission(missionId, (current) => ({
+          ...current,
+          confirmedDrone: weatherResult.confirmed?.model ?? null,
+          cruiseSpeedMph: weatherResult.cruiseSpeedMph,
+          etaDeltaMin: weatherResult.etaDeltaMin,
+        }));
+        break;
+      }
+      case "AIRSPACE": {
+        const airspaceEval = evaluateAirspaceForMission();
+        await runStep(missionId, "AIRSPACE", () => buildAirspaceStepEvidence(airspaceEval));
+        updateMission(missionId, (current) => ({
+          ...current,
+          airspaceEval,
+          selectedRoute: airspaceEval.preferredRoute,
+        }));
+        break;
+      }
+      case "MEMORY": {
+        const memoryActive = isMemoryActive(memory);
+        await runStep(missionId, "MEMORY", () => buildMemoryStepEvidence(memory));
+        updateMission(missionId, (current) => ({ ...current, pattern: memoryActive ? "MISSION_2" : "MISSION_1" }));
+        break;
+      }
+      case "ROUTES": {
+        const memoryActive = mission.pattern === "MISSION_2" || isMemoryActive(memory);
+        const routesResult = evaluateRoutesForMission(memoryActive, mission.airspaceEval);
+        const airspaceBlocksRouteA = Boolean(
+          mission.airspaceEval && !mission.airspaceEval.routeResults.find((row) => row.id === "A")?.eligible,
+        );
+        await runStep(missionId, "ROUTES", () =>
+          buildRoutesStepEvidence({
+            rows: routesResult.rows,
+            selectedRoute: routesResult.selectedRoute,
+            droneModel: mission.confirmedDrone,
+            memoryBlocksRouteA: memoryActive,
+            airspaceBlocksRouteA,
+          }),
+        );
+        updateMission(missionId, (current) => ({
+          ...current,
+          routeEval: routesResult.rows,
+          selectedRoute: routesResult.selectedRoute,
+        }));
+        break;
+      }
+      case "APPROVAL": {
+        const approvalRequired = isApprovalRequired(mission.routeEval);
+        await runStep(missionId, "APPROVAL", () => buildApprovalStepEvidence(approvalRequired));
+        updateMission(missionId, (current) => ({ ...current, approvalRequired }));
+
+        if (approvalRequired) {
+          updateMission(missionId, (current) => ({ ...current, lifecycle: "HOLD" }));
+        }
+        break;
+      }
+      case "READY": {
+        const memoryActive = mission.pattern === "MISSION_2";
+        const plan = buildApprovedPlan({
+          version: 1,
+          droneModel: mission.confirmedDrone ?? "Unassigned",
+          routeId: mission.selectedRoute ?? "A",
+          speedMph: mission.cruiseSpeedMph ?? BASE_CRUISE_SPEED_MPH,
+          primaryDropOff: `${mission.input.dropOffPreference} Zone A`,
+          backupDropOff: memoryActive ? "Alternate courtyard Zone B" : "Route C fallback zone",
+          memoriesUsed: memoryActive && memory ? [memory.id] : [],
+          weatherTimestamp: defaultWeatherSnapshot.updatedAt,
+          approvalStatus: "Autonomous launch approved",
+        });
+        await runStep(missionId, "READY", () => buildReadyStepEvidence(plan));
+        updateMission(missionId, (current) => ({ ...current, plan, lifecycle: "READY" }));
+        break;
+      }
+      default:
+        break;
+    }
 
     setIsRunningPreflight(false);
   }
@@ -244,7 +290,14 @@ export function DashboardShell() {
     if (!selectedMission) {
       return;
     }
-    void runPreflight(selectedMission.id);
+    void advancePreflightStep(selectedMission.id);
+  }
+
+  function handleNextStep() {
+    if (!selectedMission) {
+      return;
+    }
+    void advancePreflightStep(selectedMission.id);
   }
 
   function handleLaunchMission() {
@@ -291,13 +344,14 @@ export function DashboardShell() {
   async function runLiveMission1(mission: Mission) {
     const droneModel = mission.confirmedDrone ?? "Atlas HeavyLift";
     const routes = mission.mapScene.routes;
+    const flightRoute: RouteId = mission.selectedRoute ?? "B";
 
     await wait(500);
-    await animateRoute(routes, "A", 0, 0.58, 2400, setDronePosition, setRouteProgress);
+    await animateRoute(routes, flightRoute, 0, 0.58, 2400, setDronePosition, setRouteProgress);
 
     setCurrentStatus("OBSTACLE DETECTED");
     setHazardVisible(true);
-    setRouteStatuses({ A: "blocked", B: "candidate", C: "candidate" });
+    setRouteStatuses({ A: "blocked", B: flightRoute === "B" ? "selected" : "candidate", C: flightRoute === "C" ? "selected" : "candidate" });
     setLiveBattery((current) => (current === null ? null : current - 2));
     setEtaLabel("Holding");
     pushCommand("Hold position");
@@ -315,19 +369,32 @@ export function DashboardShell() {
     setMemory(savedMemory);
     window.localStorage.setItem(memoryStorageKey, JSON.stringify(savedMemory));
 
-    await wait(450);
-    setCurrentStatus("REROUTING");
-    setSelectedRoute("C");
-    setRouteStatuses({ A: "blocked", B: "candidate", C: "selected" });
-    setEtaLabel("3 min");
-    pushCommand("Select Route C");
-    pushIntegrationEvent("Google Maps 3D", "Route A blocked, Route C rendered");
+    // Airspace already kept the aircraft off Route A; continue on the approved candidate corridor.
+    if (flightRoute === "A") {
+      await wait(450);
+      setCurrentStatus("REROUTING");
+      setSelectedRoute("C");
+      setRouteStatuses({ A: "blocked", B: "candidate", C: "selected" });
+      setEtaLabel("3 min");
+      pushCommand("Select Route C");
+      pushIntegrationEvent("Google Maps 3D", "Route A blocked, Route C rendered");
 
-    await wait(500);
-    pushCommand("Resume flight");
-    setCurrentStatus("IN FLIGHT");
-    setLiveBattery((current) => (current === null ? null : current - 4));
-    await animateRoute(routes, "C", 0.24, 1, 2600, setDronePosition, setRouteProgress);
+      await wait(500);
+      pushCommand("Resume flight");
+      setCurrentStatus("IN FLIGHT");
+      setLiveBattery((current) => (current === null ? null : current - 4));
+      await animateRoute(routes, "C", 0.24, 1, 2600, setDronePosition, setRouteProgress);
+    } else {
+      await wait(450);
+      pushCommand(`Resume flight on Route ${flightRoute}`);
+      setCurrentStatus("IN FLIGHT");
+      setSelectedRoute(flightRoute);
+      setRouteStatuses({ A: "blocked", B: flightRoute === "B" ? "selected" : "candidate", C: flightRoute === "C" ? "selected" : "candidate" });
+      setEtaLabel("3 min");
+      pushIntegrationEvent("Google Maps 3D", `Route A blocked in memory; continuing Route ${flightRoute}`);
+      setLiveBattery((current) => (current === null ? null : current - 4));
+      await animateRoute(routes, flightRoute, 0.58, 1, 2200, setDronePosition, setRouteProgress);
+    }
 
     pushCommand("Verify drop-off zone");
     await wait(450);
@@ -494,6 +561,7 @@ export function DashboardShell() {
             missions={missions}
             onLaunchMission={handleLaunchMission}
             onNewMission={() => setShowNewMissionModal(true)}
+            onNextStep={handleNextStep}
             onReset={resetDemo}
             onRunPreflight={handleRunPreflight}
             onSelectMission={setSelectedMissionId}
@@ -504,6 +572,7 @@ export function DashboardShell() {
           {hasVisitedLive ? (
           <LiveMissionTab
             activeMission={activeMission}
+            airspaceEval={selectedMission?.airspaceEval ?? null}
             approval={approval}
             commandLog={commandLog}
             connectionState={connectionState}

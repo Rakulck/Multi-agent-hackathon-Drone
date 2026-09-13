@@ -38,12 +38,16 @@ interface ElementRegistry {
   craneMarker: MapEl | null;
   craneGeofence: MapEl | null;
   altitudeObstacleMarker: MapEl | null;
+  restrictedPolygons: MapEl[];
+  permittedCorridor: MapEl | null;
+  altitudeCeilingMarker: MapEl | null;
 }
 
 function emptyRegistry(): ElementRegistry {
   return {
     altDropOffAMarker: null,
     altDropOffBMarker: null,
+    altitudeCeilingMarker: null,
     altitudeObstacleMarker: null,
     craneGeofence: null,
     craneMarker: null,
@@ -52,6 +56,8 @@ function emptyRegistry(): ElementRegistry {
     dropOffMarker: null,
     map: null,
     originMarker: null,
+    permittedCorridor: null,
+    restrictedPolygons: [],
     routes: {},
   };
 }
@@ -67,6 +73,8 @@ interface GoogleMaps3DViewProps {
   reroutingBanner?: string | null;
   selectedDrone?: string;
   scene: MissionMapScene;
+  /** When true, draw FAA-constrained corridor / restricted polygons / ceiling. */
+  airspaceVisible?: boolean;
 }
 
 const routeColorClasses: Record<RouteLegendItem["status"], string> = {
@@ -87,7 +95,19 @@ const routeColorClasses: Record<RouteLegendItem["status"], string> = {
  * camera later without owning any map internals directly.
  */
 export const GoogleMaps3DView = forwardRef<DroneMapHandle, GoogleMaps3DViewProps>(function GoogleMaps3DView(
-  { routeStatuses, selectedRoute, dronePosition, hazardVisible, dropOffZone, routes, statusLabel, reroutingBanner, selectedDrone, scene },
+  {
+    routeStatuses,
+    selectedRoute,
+    dronePosition,
+    hazardVisible,
+    dropOffZone,
+    routes,
+    statusLabel,
+    reroutingBanner,
+    selectedDrone,
+    scene,
+    airspaceVisible = false,
+  },
   forwardedRef,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -238,6 +258,39 @@ export const GoogleMaps3DView = forwardRef<DroneMapHandle, GoogleMaps3DViewProps
         altitudeObstacleMarker.style.display = "none";
         map.append(altitudeObstacleMarker);
 
+        const restrictedPolygons = scene.airspace.restrictedPolygons.map((polygon) => {
+          const el = new Polygon3DElement({
+            altitudeMode,
+            outerCoordinates: polygon,
+            extruded: true,
+            fillColor: "rgba(239,68,68,0.32)",
+            strokeColor: "#ef4444",
+            strokeWidth: 2,
+          });
+          el.style.display = airspaceVisible ? "block" : "none";
+          map.append(el);
+          return el;
+        });
+
+        const permittedCorridor = new Polygon3DElement({
+          altitudeMode,
+          outerCoordinates: scene.airspace.permittedCorridor,
+          extruded: false,
+          fillColor: "rgba(34,197,94,0.28)",
+          strokeColor: "#22c55e",
+          strokeWidth: 3,
+        });
+        permittedCorridor.style.display = airspaceVisible ? "block" : "none";
+        map.append(permittedCorridor);
+
+        const altitudeCeilingMarker = new Marker3DElement({
+          altitudeMode,
+          label: `Ceiling ${scene.airspace.maxAltitudeAglFt} ft AGL · ${scene.airspace.corridorLabel}`,
+          position: scene.airspace.altitudeCeilingAnchor,
+        });
+        altitudeCeilingMarker.style.display = airspaceVisible ? "block" : "none";
+        map.append(altitudeCeilingMarker);
+
         const droneMarker = new Marker3DElement({
           altitudeMode,
           label: `${selectedDrone ?? "Atlas HeavyLift"} · Route ${selectedRoute ?? "-"} · ${Math.round(metersToFeet(dronePosition.altitude))} ft`,
@@ -248,6 +301,7 @@ export const GoogleMaps3DView = forwardRef<DroneMapHandle, GoogleMaps3DViewProps
         registryRef.current = {
           altDropOffAMarker,
           altDropOffBMarker,
+          altitudeCeilingMarker,
           altitudeObstacleMarker,
           craneGeofence,
           craneMarker,
@@ -256,6 +310,8 @@ export const GoogleMaps3DView = forwardRef<DroneMapHandle, GoogleMaps3DViewProps
           dropOffMarker,
           map,
           originMarker,
+          permittedCorridor,
+          restrictedPolygons,
           routes: routeElements,
         };
 
@@ -349,6 +405,20 @@ export const GoogleMaps3DView = forwardRef<DroneMapHandle, GoogleMaps3DViewProps
     if (craneGeofence) craneGeofence.style.display = visible ? "block" : "none";
   }, [hazardVisible, debugMode, debugHazardVisible, loadState]);
 
+  // --- Airspace compliance overlays (restricted / corridor / ceiling). ---
+  useEffect(() => {
+    const { restrictedPolygons, permittedCorridor, altitudeCeilingMarker } = registryRef.current;
+    restrictedPolygons.forEach((el) => {
+      el.style.display = airspaceVisible ? "block" : "none";
+    });
+    if (permittedCorridor) permittedCorridor.style.display = airspaceVisible ? "block" : "none";
+    if (altitudeCeilingMarker) {
+      altitudeCeilingMarker.style.display = airspaceVisible ? "block" : "none";
+      altitudeCeilingMarker.label = `Ceiling ${scene.airspace.maxAltitudeAglFt} ft AGL · ${scene.airspace.corridorLabel}`;
+      altitudeCeilingMarker.position = scene.airspace.altitudeCeilingAnchor;
+    }
+  }, [airspaceVisible, scene.airspace, loadState]);
+
   // --- Drop-off marker updates (position/label only, no recreation). ---
   useEffect(() => {
     const { dropOffMarker } = registryRef.current;
@@ -432,6 +502,7 @@ export const GoogleMaps3DView = forwardRef<DroneMapHandle, GoogleMaps3DViewProps
   if (loadState === "missing-key" || loadState === "error") {
     return (
       <MapFallback
+        airspaceVisible={airspaceVisible}
         dronePosition={dronePosition}
         dropOffZone={dropOffZone}
         hazardVisible={hazardVisible}
@@ -509,6 +580,22 @@ export const GoogleMaps3DView = forwardRef<DroneMapHandle, GoogleMaps3DViewProps
       {reroutingBanner ? (
         <div className="pointer-events-none absolute left-1/2 top-4 -translate-x-1/2 rounded-full border border-amber-300 bg-amber-50/95 px-4 py-1.5 text-[11px] font-bold uppercase tracking-[0.14em] text-amber-800 shadow-[0_12px_36px_rgba(0,0,0,0.12)] backdrop-blur">
           {reroutingBanner}
+        </div>
+      ) : null}
+
+      {airspaceVisible && scene.airspace.authorizationRequired ? (
+        <div className="pointer-events-none absolute left-1/2 top-16 -translate-x-1/2 rounded-full border border-red-300 bg-red-50/95 px-4 py-1.5 text-[11px] font-bold uppercase tracking-[0.14em] text-red-800 shadow-[0_12px_36px_rgba(0,0,0,0.12)] backdrop-blur">
+          Authorization Required · Mock LAANC · Not submitted
+        </div>
+      ) : null}
+
+      {airspaceVisible ? (
+        <div className="pointer-events-none absolute bottom-20 left-4 max-w-[280px] rounded-[18px] border border-emerald-200 bg-white/90 p-3 shadow-[0_12px_36px_rgba(0,0,0,0.12)] backdrop-blur">
+          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-emerald-700">Airspace Overlay</p>
+          <p className="mt-1 text-xs font-semibold text-black">{scene.airspace.corridorLabel}</p>
+          <p className="mt-1 text-[11px] text-neutral-600">
+            Ceiling {scene.airspace.maxAltitudeAglFt} ft AGL · red = restricted · green = candidate corridor
+          </p>
         </div>
       ) : null}
 

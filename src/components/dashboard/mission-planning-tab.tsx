@@ -15,6 +15,7 @@ interface MissionPlanningTabProps {
   missions: Mission[];
   onLaunchMission: () => void;
   onNewMission: () => void;
+  onNextStep: () => void;
   onReset: () => void;
   onRunPreflight: () => void;
   onSelectMission: (id: string) => void;
@@ -27,6 +28,7 @@ export function MissionPlanningTab({
   missions,
   onLaunchMission,
   onNewMission,
+  onNextStep,
   onReset,
   onRunPreflight,
   onSelectMission,
@@ -44,6 +46,18 @@ export function MissionPlanningTab({
     : [];
   const canRunPreflight = Boolean(selectedMission) && selectedMission?.lifecycle === "NEW" && !isRunningPreflight;
   const canLaunch = selectedMission?.lifecycle === "READY";
+  const hasNextStep = Boolean(
+    selectedMission &&
+      selectedMission.lifecycle === "PREFLIGHT" &&
+      preflightStepOrder.some((id) => selectedMission.steps[id].status === "Waiting"),
+  );
+  const canAdvanceStep =
+    Boolean(selectedMission) &&
+    hasNextStep &&
+    !isRunningPreflight &&
+    Boolean(activeStep) &&
+    activeStep?.status !== "Waiting" &&
+    activeStep?.status !== "Evaluating";
 
   return (
     <section className="grid min-h-0 flex-1 grid-cols-[22%_78%] gap-3">
@@ -89,7 +103,12 @@ export function MissionPlanningTab({
           {!selectedMission ? (
             <EmptyState />
           ) : activeStep ? (
-            <StepEvidenceCard step={activeStep} />
+            <StepEvidenceCard
+              canAdvance={canAdvanceStep}
+              isAdvancing={isRunningPreflight}
+              onNext={onNextStep}
+              step={activeStep}
+            />
           ) : (
             <EmptyState message="Run Preflight to begin the sequential evaluation." />
           )}
@@ -146,13 +165,13 @@ function buildSummaryItems(mission: Mission | null): SummaryItem[] {
       { label: "Package Weight", value: "—" },
       { label: "Eligible Drones", value: "—" },
       { label: "Weather Risk", value: "—" },
-      { label: "Safe Routes", value: "—" },
+      { label: "Airspace Auth", value: "—" },
     ];
   }
 
   const fleetStep = mission.steps.FLEET;
   const weatherStep = mission.steps.WEATHER;
-  const routesStep = mission.steps.ROUTES;
+  const airspaceStep = mission.steps.AIRSPACE;
 
   const eligibleValue =
     fleetStep.status === "Waiting" || !mission.fleetEligibility
@@ -162,15 +181,17 @@ function buildSummaryItems(mission: Mission | null): SummaryItem[] {
   const weatherValue =
     weatherStep.status === "Waiting" ? "—" : weatherStep.status === "Warning" ? "Elevated" : weatherStep.status === "Failed" ? "High" : "Low";
 
-  const safeRoutesValue =
-    routesStep.status === "Waiting" || !mission.routeEval
+  const airspaceValue =
+    airspaceStep.status === "Waiting" || !mission.airspaceEval
       ? "—"
-      : `${mission.routeEval.filter((row) => row.status === "selected" || row.status === "candidate").length}/${mission.routeEval.length}`;
+      : mission.airspaceEval.authorizationRequired
+        ? "Required"
+        : "Clear";
 
   return [
     { label: "Package Weight", value: `${mission.input.weightKg} kg` },
     { label: "Eligible Drones", value: eligibleValue },
     { label: "Weather Risk", value: weatherValue },
-    { label: "Safe Routes", value: safeRoutesValue },
+    { label: "Airspace Auth", value: airspaceValue },
   ];
 }

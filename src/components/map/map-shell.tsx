@@ -14,6 +14,7 @@ interface MapShellProps {
   reroutingBanner?: string | null;
   selectedDrone?: string;
   scene: MissionMapScene;
+  airspaceVisible?: boolean;
 }
 
 /**
