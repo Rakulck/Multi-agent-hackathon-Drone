@@ -1,6 +1,7 @@
 "use client";
 
 import { ArrowRight, Check, ChevronRight, Loader2 } from "lucide-react";
+import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import type { StepEvidence, StepStatus } from "@/types/domain";
 
@@ -15,16 +16,25 @@ const statusBadgeClasses: Record<StepStatus, string> = {
 
 export function StepEvidenceCard({
   canAdvance = false,
+  controls,
   isAdvancing = false,
   onNext,
+  showAdvance = false,
   step,
 }: {
   canAdvance?: boolean;
+  controls?: ReactNode;
   isAdvancing?: boolean;
   onNext?: () => void;
+  showAdvance?: boolean;
   step: StepEvidence;
 }) {
-  const showNext = Boolean(onNext) && (canAdvance || isAdvancing);
+  const showNext =
+    Boolean(onNext) && (showAdvance || canAdvance || isAdvancing);
+  const decisionIsUnsafe =
+    step.status === "Failed" ||
+    step.decision.toLowerCase().includes("not suitable") ||
+    step.decision.toLowerCase().includes("unsafe");
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[22px] border border-black/10 bg-white shadow-[0_14px_40px_rgba(0,0,0,0.07)]">
@@ -42,10 +52,17 @@ export function StepEvidenceCard({
           </span>
         </div>
 
+        {controls ? <div className="mt-3">{controls}</div> : null}
+
         <div className="mt-3 grid gap-2.5">
           <EvidenceBlock label="Input" items={step.input} />
           <EvidenceBlock label="Evaluation" items={step.evaluation} />
-          <div className="rounded-2xl bg-black p-3">
+          <div
+            className={cn(
+              "rounded-2xl p-3",
+              decisionIsUnsafe ? "bg-red-600" : "bg-black",
+            )}
+          >
             <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-white/50">Decision</p>
             <p className="mt-1 text-sm font-semibold leading-snug text-white">{step.decision || "Pending evaluation."}</p>
           </div>

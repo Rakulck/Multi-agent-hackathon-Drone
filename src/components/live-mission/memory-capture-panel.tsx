@@ -25,7 +25,9 @@ export function MemoryCapturePanel({ memory, hazardCenter }: MemoryCapturePanelP
         >
           {memory.airtableStatus === "fallback"
             ? "DEMO_FALLBACK · localStorage"
-            : `Airtable ${memory.airtableStatus === "saved" ? "saved" : memory.airtableStatus === "failed" ? "failed" : "saving…"}`}
+            : memory.airtableStatus === "draft"
+              ? "Awaiting verification"
+              : `Airtable ${memory.airtableStatus === "saved" ? "saved" : memory.airtableStatus === "failed" ? "failed" : "saving…"}`}
         </span>
       </div>
 
@@ -41,8 +43,14 @@ export function MemoryCapturePanel({ memory, hazardCenter }: MemoryCapturePanelP
         <Field label="Source" value={`${memory.learnedBy} · ${memory.sourceVendor}`} />
         <Field label="Expires" value={formatShortTimestamp(memory.expiresAt)} />
         <Field label="Record ID" value={memory.id} />
-        <Field label="Status" value={memory.status} />
+        <Field label="Status" value={memory.verificationStatus} />
       </div>
+
+      <p className="mt-2 rounded-xl bg-white px-2 py-1.5 text-[9px] font-semibold leading-snug text-neutral-600">
+        {memory.verificationStatus === "Human Verified"
+          ? "Detected → Deterministically Evaluated → Awaiting Verification → Human Verified → Saved to Airtable → Available to Fleet"
+          : "Detected → Deterministically Evaluated → Awaiting Verification"}
+      </p>
 
       <div
         className={cn(
@@ -51,7 +59,7 @@ export function MemoryCapturePanel({ memory, hazardCenter }: MemoryCapturePanelP
         )}
       >
         {memory.usedBy
-          ? `${memory.learnedBy} discovered the hazard → ${memory.usedBy} inherited the intelligence`
+          ? `Learned by ${memory.learnedBy} → verified by operator → reused by ${memory.usedBy}.`
           : `${memory.learnedBy} discovered the hazard → awaiting cross-vendor reuse`}
       </div>
     </div>

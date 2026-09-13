@@ -52,6 +52,9 @@ const structuredMemoryDetailsSchema = z.object({
   sourceVendor: z.string().min(1),
   sourceMission: z.string().min(1),
   expiresAt: z.string().datetime(),
+  verificationStatus: z.literal("Human Verified"),
+  verifiedAt: z.string().datetime(),
+  verifiedBy: z.string().min(1),
 });
 
 interface SanitizedUpstreamError {
@@ -62,7 +65,7 @@ interface SanitizedUpstreamError {
 
 class AirtableServiceError extends Error {
   constructor(
-    readonly state: Exclude<MemoryFetchState, "IDLE" | "LOADING" | "SUCCESS">,
+    readonly state: Exclude<MemoryFetchState, "IDLE" | "LOADING" | "SUCCESS" | "SUCCESS_EMPTY">,
     message: string,
     readonly statusCode?: number,
     readonly upstream?: SanitizedUpstreamError,
@@ -83,9 +86,12 @@ export async function loadActiveAirtableMemories(): Promise<MemoryApiResponse> {
   try {
     const memories = await loadAndExpireMemories(config, controller.signal);
     return {
-      status: "SUCCESS",
+      status: memories.length === 0 ? "SUCCESS_EMPTY" : "SUCCESS",
       memories,
-      message: `${memories.length} active, non-expired Airtable memor${memories.length === 1 ? "y" : "ies"} loaded.`,
+      message:
+        memories.length === 0
+          ? "No relevant shared hazards found."
+          : `${memories.length} active, verified, non-expired Airtable memor${memories.length === 1 ? "y" : "ies"} loaded.`,
       source: "AIRTABLE",
     };
   } catch (error) {
@@ -97,6 +103,18 @@ export async function loadActiveAirtableMemories(): Promise<MemoryApiResponse> {
 }
 
 export async function createAirtableMemoryRecord(memory: OperationalMemory): Promise<MemoryApiResponse> {
+  if (
+    memory.status !== "Active" ||
+    memory.verificationStatus !== "Human Verified" ||
+    !memory.verifiedAt ||
+    !memory.verifiedBy
+  ) {
+    return failure(
+      "INVALID_RESPONSE",
+      "Only active operational memory verified by a human operator can be saved to Airtable.",
+    );
+  }
+
   const config = getConfig();
   if (!config) {
     return failure("MISSING_KEY", "Airtable credentials or memory table name are missing.");
@@ -125,12 +143,12 @@ export async function createAirtableMemoryRecord(memory: OperationalMemory): Pro
     const response = await postMemoryFields(config, table.id, fields, controller.signal);
     const parsed = createResponseSchema.safeParse(await readJson(response));
     if (!parsed.success) {
-      throw new AirtableServiceError("INVALID_RESPONSE", "Airtable create response was missing required memory fields.");
+      throw new AirtableServiceError("API_FAILURE", "Airtable create response was missing required memory fields.");
     }
 
     const saved = fromAirtableRecord(parsed.data.records[0]);
     if (!saved) {
-      throw new AirtableServiceError("INVALID_RESPONSE", "Airtable create response did not contain a valid operational memory.");
+      throw new AirtableServiceError("API_FAILURE", "Airtable create response did not contain a valid operational memory.");
     }
     return {
       status: "SUCCESS",
@@ -161,7 +179,7 @@ async function loadAndExpireMemories(config: AirtableConfig, signal: AbortSignal
     const response = await airtableFetch(config, `?${params.toString()}`, { method: "GET", signal });
     const parsed = listResponseSchema.safeParse(await readJson(response));
     if (!parsed.success) {
-      throw new AirtableServiceError("INVALID_RESPONSE", "Airtable returned an invalid operational-memory record.");
+      throw new AirtableServiceError("API_FAILURE", "Airtable returned malformed operational-memory data.");
     }
     records.push(...parsed.data.records);
     offset = parsed.data.offset;
@@ -171,7 +189,13 @@ async function loadAndExpireMemories(config: AirtableConfig, signal: AbortSignal
   return records
     .map(fromAirtableRecord)
     .filter((memory): memory is OperationalMemory => Boolean(memory))
-    .filter((memory) => memory.status === "Active" && new Date(memory.expiresAt).getTime() > now);
+    .filter(
+      (memory) =>
+        memory.status === "Active" &&
+        memory.verificationStatus === "Human Verified" &&
+        Boolean(memory.verifiedAt) &&
+        new Date(memory.expiresAt).getTime() > now,
+    );
 }
 
 function postMemoryFields(
@@ -258,7 +282,7 @@ async function loadConfiguredTableSchema(
   const parsed = metadataResponseSchema.safeParse(await readJson(response));
   if (!parsed.success) {
     throw new AirtableServiceError(
-      "INVALID_RESPONSE",
+      "API_FAILURE",
       "Airtable metadata API returned an invalid table schema.",
     );
   }
@@ -268,7 +292,7 @@ async function loadConfiguredTableSchema(
   );
   if (!table) {
     throw new AirtableServiceError(
-      "INVALID_RESPONSE",
+      "API_FAILURE",
       `Configured Airtable table "${sanitizeText(config.tableName, config.token)}" was not found in base metadata.`,
     );
   }
@@ -307,7 +331,7 @@ async function readJson(response: Response): Promise<unknown> {
   try {
     return await response.json();
   } catch {
-    throw new AirtableServiceError("INVALID_RESPONSE", "Airtable returned invalid JSON.");
+    throw new AirtableServiceError("API_FAILURE", "Airtable returned invalid JSON.");
   }
 }
 
@@ -315,6 +339,16 @@ function toConfiguredAirtableFields(
   memory: OperationalMemory,
   table: z.infer<typeof airtableTableSchema>,
 ): Record<string, string | number | boolean> {
+  if (
+    memory.verificationStatus !== "Human Verified" ||
+    !memory.verifiedAt ||
+    !memory.verifiedBy
+  ) {
+    throw new AirtableServiceError(
+      "INVALID_RESPONSE",
+      "Airtable memory payload is missing human-verification metadata.",
+    );
+  }
   const writable: Record<string, string | number | boolean> = {};
   const fieldsByName = new Map(table.fields.map((field) => [field.name, field]));
 
@@ -358,6 +392,9 @@ function toConfiguredAirtableFields(
     sourceVendor: memory.sourceVendor,
     sourceMission: memory.sourceMission,
     expiresAt: memory.expiresAt,
+    verificationStatus: memory.verificationStatus,
+    verifiedAt: memory.verifiedAt,
+    verifiedBy: memory.verifiedBy,
   };
 
   setField(
@@ -382,7 +419,7 @@ function toConfiguredAirtableFields(
   setField("Last Detected Time", "dateTime", memory.createdAt);
   setField("Active Status", "checkbox", memory.status === "Active");
   setField("Confidence Score", "percent", memory.confidence);
-  setField("Verification Required", "checkbox", memory.confidence < 0.75);
+  setField("Verification Required", "checkbox", false);
   setField(
     "Reporter",
     "singleLineText",
@@ -487,6 +524,9 @@ function fromAirtableRecord(record: z.infer<typeof airtableRecordSchema>): Opera
   const summary =
     readDescriptionSummary(fields) ??
     `${hazardType ?? "Obstacle"} affects Route ${routeId}; avoid the recorded radius while active.`;
+  const verificationStatus = structured?.verificationStatus;
+  const verifiedAt = structured?.verifiedAt;
+  const verifiedBy = structured?.verifiedBy;
 
   if (
     !id ||
@@ -504,7 +544,10 @@ function fromAirtableRecord(record: z.infer<typeof airtableRecordSchema>): Opera
     !sourceMission ||
     !createdAt ||
     !expiresAt ||
-    !status
+    !status ||
+    verificationStatus !== "Human Verified" ||
+    !verifiedAt ||
+    !verifiedBy
   ) {
     return null;
   }
@@ -527,6 +570,9 @@ function fromAirtableRecord(record: z.infer<typeof airtableRecordSchema>): Opera
     sourceVendor,
     sourceMission,
     status,
+    verificationStatus,
+    verifiedAt,
+    verifiedBy,
     dataSource: "AIRTABLE",
     airtableStatus: "saved",
   };
@@ -607,12 +653,27 @@ function readStatus(fields: Record<string, unknown>, names: string[]): Operation
 }
 
 function isDuplicate(existing: OperationalMemory, incoming: OperationalMemory) {
-  const sameType = existing.hazardType.trim().toLowerCase() === incoming.hazardType.trim().toLowerCase();
+  const sameType =
+    normalizeHazardType(existing.hazardType) ===
+    normalizeHazardType(incoming.hazardType);
   const sameLocation = distanceMeters(existing, incoming) <= DUPLICATE_DISTANCE_M;
   const overlappingWindow =
     new Date(existing.createdAt).getTime() < new Date(incoming.expiresAt).getTime() &&
     new Date(existing.expiresAt).getTime() > new Date(incoming.createdAt).getTime();
-  return sameType && sameLocation && overlappingWindow && existing.status === "Active";
+  return (
+    sameType &&
+    sameLocation &&
+    existing.sourceMission === incoming.sourceMission &&
+    overlappingWindow &&
+    existing.status === "Active"
+  );
+}
+
+function normalizeHazardType(value: string) {
+  const normalized = value.trim().toLowerCase().replaceAll("_", " ");
+  return normalized.includes("construction") || normalized.includes("crane")
+    ? "construction-crane"
+    : normalized;
 }
 
 function distanceMeters(
@@ -656,7 +717,7 @@ function handleError(error: unknown): MemoryApiResponse {
 }
 
 function failure(
-  status: Exclude<MemoryFetchState, "IDLE" | "LOADING" | "SUCCESS">,
+  status: Exclude<MemoryFetchState, "IDLE" | "LOADING" | "SUCCESS" | "SUCCESS_EMPTY">,
   message: string,
   upstream?: SanitizedUpstreamError,
 ): MemoryApiResponse {

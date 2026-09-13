@@ -13,10 +13,17 @@ Send customer-facing delivery updates. Twilio failure should never change flight
 
 ## Required values
 
-- Account SID.
-- Auth Token, or an API Key SID and API Key Secret supported by the server SDK setup.
-- Twilio `From` number.
-- Verified trial `To` number.
+- `TWILIO_ACCOUNT_SID`.
+- `TWILIO_AUTH_TOKEN`.
+- `TWILIO_PHONE_NUMBER` (the Twilio `From` number).
+- `TWILIO_DEMO_RECIPIENT` (a verified trial recipient in E.164 format).
+- `PUBLIC_APP_URL` (ngrok HTTPS origin locally or the Vercel origin in production).
+- `DELIVERY_CHOICE_SIGNING_SECRET` (recommended dedicated HMAC secret).
+
+No inbound SMS webhook is required. When a customer decision is needed,
+Twilio sends a short-lived `/delivery-choice/[secureToken]` link. The web
+selection is evaluated by the deterministic safety engine before any route or
+destination change.
 
 ## Important distinction
 

@@ -21,8 +21,8 @@ const scenarios: Record<
     condition: "Clear",
   },
   MODERATE: {
-    windMph: 16,
-    gustMph: 19,
+    windMph: 15,
+    gustMph: 17,
     windDirectionDeg: 275,
     visibilityMiles: 7,
     temperatureF: 64,

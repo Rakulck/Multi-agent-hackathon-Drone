@@ -6,7 +6,11 @@ import {
 } from "@/data/demo-airspace";
 import { apartmentDestination, craneHazard, dispatchOrigin, initialRouteStatuses } from "@/data/demo-routes";
 import { fleetDrones } from "@/data/demo-dashboard";
-import { buildMissionMapScene, defaultMapScene } from "@/lib/map/route-warp";
+import {
+  buildMissionMapScene,
+  buildSharedCorridorDemoScene,
+  defaultMapScene,
+} from "@/lib/map/route-warp";
 import type {
   AirspaceEval,
   AirspaceRouteResult,
@@ -49,20 +53,44 @@ export const groceryOrder = {
 
 export const demoPresetInputs: Record<"MISSION_1" | "MISSION_2", NewMissionInput> = {
   MISSION_1: {
+    customerName: "Gateway Apartments Customer",
     deliveryType: "Grocery",
     weightKg: 4.5,
-    pickup: "Grocery Hub",
-    drop: "Riverside Apartments",
+    pickup: "One Market Plaza, 1 Market Street, San Francisco, CA 94105",
+    drop: "The Gateway Apartments, 460 Davis Court, San Francisco, CA 94111",
     priority: "Express",
     dropOffPreference: "Courtyard",
+    useDemoRecipient: true,
+    pickupPlace: {
+      label: "One Market Plaza, 1 Market Street, San Francisco, CA 94105",
+      lat: 37.79362,
+      lng: -122.39486,
+    },
+    dropPlace: {
+      label: "The Gateway Apartments, 460 Davis Court, San Francisco, CA 94111",
+      lat: 37.79872,
+      lng: -122.39812,
+    },
   },
   MISSION_2: {
+    customerName: "Pier 39 Receiving",
     deliveryType: "Small Logistics",
     weightKg: 5.5,
-    pickup: "Grocery Hub",
-    drop: "Riverside Apartments",
+    pickup: "Salesforce Tower, 415 Mission Street, San Francisco, CA 94105",
+    drop: "Pier 39, The Embarcadero, San Francisco, CA 94133",
     priority: "Critical",
     dropOffPreference: "Primary entrance",
+    useDemoRecipient: true,
+    pickupPlace: {
+      label: "Salesforce Tower, 415 Mission Street, San Francisco, CA 94105",
+      lat: 37.78974,
+      lng: -122.3961,
+    },
+    dropPlace: {
+      label: "Pier 39, The Embarcadero, San Francisco, CA 94133",
+      lat: 37.80867,
+      lng: -122.40982,
+    },
   },
 };
 
@@ -127,14 +155,36 @@ export function createCraneMemory(params: {
     avoidanceRadiusM: 120,
     sourceVendor: params.sourceVendor,
     sourceMission: params.sourceMission,
-    status: "Active",
+    status: "Inactive",
+    verificationStatus: "Awaiting Verification",
     dataSource: params.dataSource ?? "AIRTABLE",
-    airtableStatus: params.dataSource === "DEMO_FALLBACK" ? "fallback" : "saving",
+    airtableStatus: "draft",
+  };
+}
+
+export function verifyOperationalMemory(
+  memory: OperationalMemory,
+  operatorName: string,
+  verifiedAt = new Date().toISOString(),
+): OperationalMemory {
+  return {
+    ...memory,
+    status: "Active",
+    verificationStatus: "Human Verified",
+    verifiedAt,
+    verifiedBy: operatorName,
+    airtableStatus: memory.dataSource === "DEMO_FALLBACK" ? "fallback" : "saving",
   };
 }
 
 export function markMemorySaved(memory: OperationalMemory): OperationalMemory {
-  return { ...memory, dataSource: "AIRTABLE", airtableStatus: "saved" };
+  return {
+    ...memory,
+    status: "Active",
+    verificationStatus: "Human Verified",
+    dataSource: "AIRTABLE",
+    airtableStatus: "saved",
+  };
 }
 
 export function markMemoryUsed(memory: OperationalMemory, usedBy: string): OperationalMemory {
@@ -145,7 +195,19 @@ export function markMemoryUsed(memory: OperationalMemory, usedBy: string): Opera
 }
 
 export function isMemoryActive(memory: OperationalMemory | null): memory is OperationalMemory {
-  return Boolean(memory && memory.status === "Active" && new Date(memory.expiresAt).getTime() > Date.now());
+  return Boolean(
+    memory &&
+      memory.status === "Active" &&
+      memory.verificationStatus === "Human Verified" &&
+      Boolean(memory.verifiedAt) &&
+      new Date(memory.expiresAt).getTime() > Date.now(),
+  );
+}
+
+export function isMemoryFetchSuccess(
+  status: MemoryApiResponse["status"],
+): status is "SUCCESS" | "SUCCESS_EMPTY" {
+  return status === "SUCCESS" || status === "SUCCESS_EMPTY";
 }
 
 export function interpolateRoute(routes: DemoRoute[], routeId: RouteId, progress: number): GeoPoint3D {
@@ -219,6 +281,10 @@ export function deriveFlightMode(params: {
 
   if (status === "REROUTING") {
     return "REROUTING";
+  }
+
+  if (status === "RETURNING_HOME") {
+    return "RETURNING";
   }
 
   if (status === "IN FLIGHT") {
@@ -367,7 +433,15 @@ let missionCounter = 0;
 /** Builds the mission's map scene from geocoded pickup/drop addresses, falling back to the fixed demo scene. */
 export function buildMapSceneForInput(input: NewMissionInput): MissionMapScene {
   if (!input.pickupPlace || !input.dropPlace) {
-    return defaultMapScene;
+    return {
+      ...defaultMapScene,
+      originLabel: input.pickup,
+      destinationLabel: input.drop,
+      dropOffZone: {
+        ...defaultMapScene.dropOffZone,
+        label: input.drop,
+      },
+    };
   }
 
   return buildMissionMapScene({
@@ -379,8 +453,31 @@ export function buildMapSceneForInput(input: NewMissionInput): MissionMapScene {
   });
 }
 
-export function createMission(input: NewMissionInput, pattern: MissionRun = "MISSION_1"): Mission {
+export function createMission(
+  input: NewMissionInput,
+  pattern: MissionRun = "MISSION_1",
+  options: { isDemoPreset?: boolean } = {},
+): Mission {
   missionCounter += 1;
+  const baseMapScene = buildMapSceneForInput(input);
+  const presetMapScene =
+    options.isDemoPreset && input.pickupPlace && input.dropPlace
+      ? buildSharedCorridorDemoScene(pattern, {
+          pickupPlace: input.pickupPlace,
+          dropPlace: input.dropPlace,
+        })
+      : baseMapScene;
+  const mapScene =
+    options.isDemoPreset && pattern === "MISSION_1"
+      ? {
+          ...presetMapScene,
+          airspace: {
+            ...presetMapScene.airspace,
+            authorizationRequired: false,
+            corridorLabel: "Approved controlled Mission 1 demo corridor",
+          },
+        }
+      : presetMapScene;
 
   return {
     id: `mission-${Date.now()}-${missionCounter}`,
@@ -389,16 +486,18 @@ export function createMission(input: NewMissionInput, pattern: MissionRun = "MIS
     input,
     lifecycle: "NEW",
     pattern,
+    isDemoPreset: options.isDemoPreset ?? false,
     steps: makeEmptyStepEvidence(),
     activeStepId: null,
     fleetEligibility: null,
     provisionalDrone: null,
     confirmedDrone: null,
-    weatherMode: "LIVE",
+    weatherMode: options.isDemoPreset ? "SAFE" : "LIVE",
     weatherFetchState: "IDLE",
     weatherFetchMessage: null,
     weather: null,
     weatherEvaluation: null,
+    weatherApprovalGranted: false,
     memoryMode: "AIRTABLE",
     memoryFetchState: "IDLE",
     memoryFetchMessage: null,
@@ -412,8 +511,16 @@ export function createMission(input: NewMissionInput, pattern: MissionRun = "MIS
     riskReview: null,
     approvalRequired: false,
     plan: null,
-    mapScene: buildMapSceneForInput(input),
+    mapScene,
+    customerCommunication: null,
   };
+}
+
+export function primaryDropOffName(input: NewMissionInput): string {
+  const location = input.drop.trim();
+  return location
+    ? `${input.dropOffPreference} at ${location}`
+    : input.dropOffPreference;
 }
 
 export function resetMissionCounter() {
@@ -431,6 +538,7 @@ export function buildRequestStepEvidence(input: NewMissionInput): StepEvidence {
     id: "REQUEST",
     title: stepTitles.REQUEST,
     input: [
+      ...(input.customerName ? [`Customer: ${input.customerName}`] : []),
       `${input.deliveryType} delivery`,
       `${input.weightKg} kg package`,
       `Pickup: ${input.pickup}`,
@@ -446,7 +554,7 @@ export function buildRequestStepEvidence(input: NewMissionInput): StepEvidence {
       `Determined special payload capability: ${cargoRequirement}.`,
     ],
     decision,
-    source: ["Agent", "Gemini (simulated request normalization)"],
+    source: ["Mission Agent"],
     status: "Completed",
     summary: `${input.weightKg} kg ${input.priority.toLowerCase()} ${input.deliveryType.toLowerCase()} mission validated.`,
   };
@@ -536,7 +644,7 @@ export function buildFleetStepEvidence(rows: FleetEvalRow[], weightKg: number): 
     decision: provisional
       ? `${rows.length - eligibleCount} of ${rows.length} drones rejected. Provisional selection: ${provisional.drone.model}.`
       : "No eligible drone found for this payload.",
-    source: ["Airtable", "Deterministic Agent Rules"],
+    source: ["Airtable", "Deterministic Safety Engine"],
     status: provisional ? "Completed" : "Failed",
     summary: `${eligibleCount} of ${rows.length} drones eligible. ${
       provisional ? `${provisional.drone.model} provisionally selected.` : "No eligible drone."
@@ -598,8 +706,13 @@ export function buildWeatherStepEvidence(params: {
 }): StepEvidence {
   const { weather, evaluation, fetchState, fetchMessage } = params;
   const adjusted = evaluation.speedReductionMph > 0;
+  const liveFetchFailed = fetchState !== "SUCCESS";
   const status =
-    evaluation.paused ? "Failed" : evaluation.severity === "MODERATE" || weather.dataSource === "DEMO_FALLBACK" ? "Warning" : "Completed";
+    evaluation.paused
+      ? "Failed"
+      : evaluation.severity === "MODERATE" || liveFetchFailed
+        ? "Warning"
+        : "Completed";
 
   return {
     id: "WEATHER",
@@ -631,8 +744,8 @@ export function buildWeatherStepEvidence(params: {
     decision: `${evaluation.severity}: ${evaluation.reason}`,
     source:
       weather.dataSource === "LIVE"
-        ? ["OpenWeather LIVE", "Deterministic Safety Rules"]
-        : ["DEMO_FALLBACK (not live)", "Deterministic Safety Rules"],
+        ? ["OpenWeather LIVE", "Deterministic Safety Engine"]
+        : ["DEMO_FALLBACK (not live)", "Deterministic Safety Engine"],
     status,
     summary: evaluation.paused
       ? "UNSAFE — mission paused; every eligible drone rejected."
@@ -641,33 +754,48 @@ export function buildWeatherStepEvidence(params: {
 }
 
 /** STEP 4 — Airspace Compliance. */
-export function evaluateAirspaceForMission(selectedRoute: RouteId | null = null): AirspaceEval {
+export function evaluateAirspaceForMission(
+  selectedRoute: RouteId | null = null,
+  options: {
+    controlledDemoPreset?: boolean;
+    routeCRequiresAuthorization?: boolean;
+  } = {},
+): AirspaceEval {
   const routeResults: AirspaceRouteResult[] = (["A", "B", "C"] as RouteId[]).map((id) => {
     const compliance = airspaceRouteCompliance[id];
+    const requiresUnavailableAuthorization =
+      id === "C" && options.routeCRequiresAuthorization;
     return {
       id,
       name: `Route ${id}`,
-      eligible: compliance.eligible,
+      eligible: compliance.eligible && !requiresUnavailableAuthorization,
       plannedAglFt: compliance.plannedAglFt,
-      reason: compliance.reason,
+      reason: requiresUnavailableAuthorization
+        ? "Unavailable for Mission 2: the alternate corridor lacks the required FAA/LAANC authorization."
+        : compliance.reason,
     };
   });
 
   const eligible = routeResults.filter((row) => row.eligible).map((row) => row.name);
   const preferred = selectedRoute && routeResults.some((row) => row.id === selectedRoute && row.eligible) ? selectedRoute : airspacePreferredRoute;
 
+  const authorizationRequired =
+    options.controlledDemoPreset ? false : airspaceSnapshotMeta.authorizationRequired;
+
   return {
     airspaceClass: airspaceSnapshotMeta.airspaceClass,
     maxAltitudeAglFt: airspaceSnapshotMeta.maxAltitudeAglFt,
-    authorizationRequired: airspaceSnapshotMeta.authorizationRequired,
-    laancAuthorized: false,
+    authorizationRequired,
+    laancAuthorized: options.controlledDemoPreset ?? false,
     restrictions: activeAirspaceRestrictions.map((restriction) => ({ ...restriction })),
     routeResults,
     preferredRoute: preferred,
     dataSource: airspaceSnapshotMeta.dataSource,
     timestamp: airspaceSnapshotMeta.updatedAt,
     facilityMapGrid: airspaceSnapshotMeta.facilityMapGrid,
-    decision: `${eligible.join(", ")} pass the published ceiling and geofence rules. Route ${preferred} remains eligible in controlled airspace with mock LAANC authorization still required.`,
+    decision: options.controlledDemoPreset
+      ? `${eligible.join(", ")} pass the published ceiling and geofence rules. Route ${preferred} is eligible in the pre-authorized controlled demo corridor.`
+      : `${eligible.join(", ")} pass the published ceiling and geofence rules. Route ${preferred} remains eligible in controlled airspace with mock LAANC authorization still required.`,
   };
 }
 
@@ -700,7 +828,7 @@ export function buildAirspaceStepEvidence(evalResult: AirspaceEval): StepEvidenc
       ),
     ],
     decision: evalResult.decision,
-    source: ["FAA UAS Facility Map (public)", "Mock TFR/NOTAM", "Mock LAANC status", "Agent"],
+    source: ["FAA UAS Facility Map (public)", "Mock TFR/NOTAM", "Mock LAANC status", "Deterministic Safety Engine"],
     status: evalResult.authorizationRequired ? "Warning" : "Completed",
     summary: `Max ${evalResult.maxAltitudeAglFt} ft AGL. Auth required: ${
       evalResult.authorizationRequired ? "Yes" : "No"
@@ -713,7 +841,7 @@ export function evaluateMemoriesAgainstRoutes(
   memories: OperationalMemory[],
   routes: DemoRoute[],
 ): MemoryRouteMatch[] {
-  return memories.flatMap((memory) =>
+  return memories.filter(isMemoryActive).flatMap((memory) =>
     routes.map((route) => {
       const distanceM = minimumRouteDistanceM(memory.latitude, memory.longitude, route.waypoints);
       const routeAltitudes = route.waypoints.map((point) => point.altitude);
@@ -741,14 +869,16 @@ export function buildMemoryStepEvidence(params: {
   retrievedBy: string | null;
 }): StepEvidence {
   const { response, matches, retrievedBy } = params;
-  const failed = response.status !== "SUCCESS";
+  const failed = !isMemoryFetchSuccess(response.status);
   const blockingMatches = matches.filter((match) => match.matched);
 
   return {
     id: "MEMORY",
     title: stepTitles.MEMORY,
     input: [
-      `Memory load state: ${response.status} — ${response.message}`,
+      response.status === "SUCCESS_EMPTY"
+        ? "Active verified memories retrieved from Airtable. No records returned."
+        : `Memory load state: ${response.status} — ${response.message}`,
       `Data source: ${response.source}`,
       "Candidate route coordinates and altitude bands: A, B, C",
       `Current time: ${formatClockTime(new Date())}`,
@@ -761,29 +891,40 @@ export function buildMemoryStepEvidence(params: {
           "Route safety cannot be completed without human review.",
         ]
       : response.memories.length === 0
-        ? ["No active, non-expired operational memories overlap this mission."]
+        ? ["No relevant shared hazards found."]
         : [
             ...response.memories.map(
-              (memory) =>
-                `${retrievedBy ?? "Selected drone"} retrieved ${memory.id}, created by ${memory.learnedBy} (${memory.sourceVendor}); expires ${formatTimestampShort(memory.expiresAt)}.`,
+              (memory) => {
+                const intersects = matches.some(
+                  (match) => match.memoryId === memory.id && match.matched,
+                );
+                if (retrievedBy && intersects) {
+                  return `${memory.learnedBy} crane memory intersects Mission 2’s Route A shared corridor despite different pickup and destination addresses. Record ${memory.id}; expires ${formatTimestampShort(memory.expiresAt)}.`;
+                }
+                return intersects
+                  ? `${memory.id}, created by ${memory.learnedBy} (${memory.sourceVendor}), intersects a candidate route in both location and altitude.`
+                  : `${memory.id}, created by ${memory.learnedBy} (${memory.sourceVendor}), does not intersect a candidate route in both location and altitude; expires ${formatTimestampShort(memory.expiresAt)}.`;
+              },
             ),
             ...matches.map((match) => `${match.memoryId}: ${match.reason}`),
           ],
     decision: failed
       ? "Mission paused. Human approval required because Airtable memory state is unavailable."
       : blockingMatches.length > 0
-        ? `${blockingMatches.map((match) => `Route ${match.routeId}`).join(", ")} rejected using active shared memory.`
-        : "No active memory intersects a route in both location and altitude.",
+        ? "Route A rejected from shared memory. Route C rejected because FAA/LAANC authorization is unavailable. Route B selected before takeoff."
+        : "No relevant shared hazards found.",
     source:
-      response.source === "AIRTABLE"
-        ? ["Airtable LIVE", "Deterministic Coordinate + Altitude Rules"]
-        : ["localStorage DEMO_FALLBACK (not Airtable)", "Deterministic Coordinate + Altitude Rules"],
+      response.presetIsolation
+        ? ["Controlled Mission 1 preset", "Deterministic Safety Engine"]
+        : response.source === "AIRTABLE"
+        ? ["Airtable", "Spatial Safety Engine", "Mission Agent"]
+        : ["localStorage DEMO_FALLBACK (not Airtable)", "Deterministic Safety Engine"],
     status: failed ? "Approval" : blockingMatches.length > 0 ? "Warning" : "Completed",
     summary: failed
       ? `${response.status} — mission paused for human approval.`
       : blockingMatches.length > 0
-        ? `${retrievedBy ?? "Drone"} retrieved ${response.memories.length} memor${response.memories.length === 1 ? "y" : "ies"}; Route ${blockingMatches[0].routeId} rejected.`
-        : "No route-blocking memories found.",
+        ? "Different locations · shared corridor · verified memory reused."
+        : "No relevant shared hazards found.",
   };
 }
 
@@ -836,6 +977,9 @@ export function evaluateRoutesForMission(
   }
 
   if (memoryBlocksRouteA) {
+    const routeCEligible =
+      airspaceEval?.routeResults.find((row) => row.id === "C")?.eligible ?? true;
+    const selectedAlternate: RouteId = routeCEligible ? "C" : "B";
     const rows: RouteEvalRow[] = [
       {
         id: "A",
@@ -852,10 +996,13 @@ export function evaluateRoutesForMission(
         id: "B",
         name: "Route B",
         ...routeBaseStats.B,
-        weatherExposure: "Marginal",
+        weatherExposure: selectedAlternate === "B" ? "Within limits" : "Marginal",
         memoryConflict: "None",
-        status: "warning",
-        reason: "Warning due to courtyard approach.",
+        status: selectedAlternate === "B" ? "selected" : "warning",
+        reason:
+          selectedAlternate === "B"
+            ? "Selected: memory-safe corridor with required FAA constraints satisfied."
+            : "Warning due to courtyard approach.",
       },
       {
         id: "C",
@@ -863,11 +1010,13 @@ export function evaluateRoutesForMission(
         ...routeBaseStats.C,
         weatherExposure: "Within limits",
         memoryConflict: "None",
-        status: "selected",
-        reason: "Selected as safest available route using shared memory.",
+        status: routeCEligible ? "selected" : "blocked",
+        reason: routeCEligible
+          ? "Selected as safest available route using shared memory."
+          : "Rejected: required FAA/LAANC authorization is unavailable for Mission 2.",
       },
     ];
-    return { rows, selectedRoute: "C" };
+    return { rows, selectedRoute: selectedAlternate };
   }
 
   // Airspace blocks Route A; no active memory — prefer the FAA-constrained candidate (B).
@@ -947,10 +1096,10 @@ export function buildRoutesStepEvidence(params: {
         `${row.name}: ${row.distanceKm} km, ~${row.etaMin} min, weather ${row.weatherExposure}, memory ${row.memoryConflict} — ${row.status}.`,
     ),
     decision: rows.map((row) => `${row.name} ${row.status}: ${row.reason}`).join(" "),
-    source: ["Google Maps 3D", "Airtable", "FAA UAS Facility Map (public)", "Agent"],
+    source: ["Google Maps 3D", "Airtable", "FAA UAS Facility Map (public)", "Deterministic Safety Engine"],
     status: rows.find((row) => row.id === selectedRoute) ? "Completed" : "Failed",
     summary: memoryBlocksRouteA
-      ? `Route C selected using shared memory.`
+      ? `Route ${selectedRoute} selected after shared-memory and FAA checks.`
       : airspaceBlocksRouteA
         ? `Route ${selectedRoute} selected inside the FAA-constrained candidate corridor.`
         : `Route A selected. Routes B and C retained as fallbacks.`,
@@ -960,6 +1109,13 @@ export function buildRoutesStepEvidence(params: {
 /** STEP 7 — deterministic SAFE / CAUTION / UNSAFE mission review. */
 export function evaluateMissionRiskReview(mission: Mission): MissionRiskReview {
   const conditions: MissionRiskCondition[] = [];
+  const reusingVerifiedSpatialMemory = mission.memories.some(
+    (memory) =>
+      isMemoryActive(memory) &&
+      mission.memoryMatches.some(
+        (match) => match.memoryId === memory.id && match.matched,
+      ),
+  );
   const selectedFleetRow =
     mission.fleetEligibility?.find(
       (row) => row.drone.model === mission.confirmedDrone,
@@ -1061,9 +1217,9 @@ export function evaluateMissionRiskReview(mission: Mission): MissionRiskReview {
     if (
       mission.weatherEvaluation?.severity !== "MODERATE" ||
       !selectedWeatherEvaluation ||
-      selectedWeatherEvaluation.utilizationPercent < 75
+      mission.weatherApprovalGranted
     ) {
-      // Moderate conditions with at least 25% certified wind margin remain SAFE.
+      // No operator weather review is needed without a moderate selected-drone result.
     } else {
     const peak = Math.max(mission.weather.windMph, mission.weather.gustMph);
     conditions.push({
@@ -1099,6 +1255,24 @@ export function evaluateMissionRiskReview(mission: Mission): MissionRiskReview {
     });
   }
 
+  if (
+    mission.pattern === "MISSION_2" &&
+    reusingVerifiedSpatialMemory &&
+    mission.selectedRoute === "B"
+  ) {
+    conditions.push({
+      id: "shared-memory-route-change",
+      kind: "ROUTE_ADJUSTMENT",
+      level: "CAUTION",
+      riskDetected:
+        "Route A is blocked by verified crane memory; Route C lacks available FAA/LAANC authorization.",
+      currentValue: "Preflight proposes Route B",
+      allowedLimit: "Operator approval required before changing the planned corridor",
+      agentRecommendation: "Approve Route B before takeoff.",
+      proposedAdjustment: "Change Route A → Route B before launch.",
+    });
+  }
+
   if (selectedAirspace && !selectedAirspace.eligible) {
     conditions.push(
       hardRisk(
@@ -1109,7 +1283,10 @@ export function evaluateMissionRiskReview(mission: Mission): MissionRiskReview {
         "Block launch and select a compliant corridor.",
       ),
     );
-  } else if (mission.selectedRoute === "A") {
+  } else if (
+    mission.selectedRoute === "A" &&
+    !(mission.isDemoPreset && mission.pattern === "MISSION_1")
+  ) {
     conditions.push({
       id: "restricted-airspace-proximity",
       kind: "AIRSPACE_PROXIMITY",
@@ -1117,14 +1294,22 @@ export function evaluateMissionRiskReview(mission: Mission): MissionRiskReview {
       riskDetected: "Selected route passes close to the restricted dockside geofence.",
       currentValue: "Route A requires live monitoring near the active geofence",
       allowedLimit: "No entry into GF-RESTRICTED-DOCK",
-      agentRecommendation: "Prefer the compliant Route B corridor.",
-      proposedAdjustment: "Switch Route A → Route B; estimated ETA +2 min.",
+      agentRecommendation:
+        mission.pattern === "MISSION_1"
+          ? "Retain Route A for the controlled sensor demo with continuous geofence monitoring."
+          : "Prefer the compliant Route B corridor.",
+      proposedAdjustment:
+        mission.pattern === "MISSION_1"
+          ? "Keep Route A and hold immediately if live sensing finds a corridor conflict."
+          : "Switch Route A → Route B; estimated ETA +2 min.",
     });
   }
 
   if (
     selectedAirspace &&
     mission.airspaceEval &&
+    !(mission.isDemoPreset && mission.pattern === "MISSION_1") &&
+    !reusingVerifiedSpatialMemory &&
     selectedAirspace.plannedAglFt >= mission.airspaceEval.maxAltitudeAglFt * 0.95
   ) {
     conditions.push({
@@ -1141,6 +1326,7 @@ export function evaluateMissionRiskReview(mission: Mission): MissionRiskReview {
 
   if (
     selectedRoute &&
+    !reusingVerifiedSpatialMemory &&
     (selectedRoute.etaMin > routeBaseStats.A.etaMin || mission.etaDeltaMin > 0)
   ) {
     const totalImpact =
@@ -1229,8 +1415,8 @@ export function buildApprovalStepEvidence(
           : "SAFE: continue automatically without sending Slack.",
     source:
       review.level === "CAUTION"
-        ? ["Deterministic Safety Rules", "Slack"]
-        : ["Deterministic Safety Rules", "Slack not contacted"],
+        ? ["Deterministic Safety Engine", "Slack"]
+        : ["Deterministic Safety Engine", "Slack not contacted"],
     status,
     summary:
       operatorDecision === "TIMED_OUT"
@@ -1306,7 +1492,7 @@ export function buildReadyStepEvidence(plan: ApprovedPlan): StepEvidence {
       `Weather snapshot timestamp attached: ${plan.weatherTimestamp}.`,
     ],
     decision: "Mission package validated and ready to launch.",
-    source: ["Agent", "Airtable", "OpenWeather", "Google Maps", "Slack status"],
+    source: ["Mission Agent", "Airtable", "OpenWeather", "Google Maps", "Slack status"],
     status: "Completed",
     summary: "Approved Plan V1 ready. Launch Mission enabled.",
   };

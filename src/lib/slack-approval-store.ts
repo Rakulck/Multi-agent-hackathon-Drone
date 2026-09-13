@@ -4,6 +4,10 @@ import { randomUUID } from "node:crypto";
 import type {
   ApprovalDecision,
   ApprovalTransport,
+  LiveObstacleMitigation,
+  OperationalMemory,
+  RouteId,
+  SlackApprovalKind,
   SlackApprovalApiResponse,
   SlackApprovalStatus,
 } from "@/types/domain";
@@ -16,6 +20,8 @@ export interface CreateSlackApprovalInput {
   idempotencyKey: string;
   missionId: string;
   droneName: string;
+  vendorName?: string;
+  approvalKind: SlackApprovalKind;
   currentStatus: string;
   coordinates: SlackApprovalMessage["coordinates"];
   reason: string;
@@ -23,6 +29,15 @@ export interface CreateSlackApprovalInput {
   proposedAlternative: string;
   routeImpact: string;
   etaImpact: string;
+  liveObstacle?: {
+    detectedObstacle: string;
+    geminiConfidence: number;
+    currentRoute: RouteId;
+    recommendedRoute: RouteId;
+    recommendedAltitudeM: number;
+    rejectionReason: string;
+  };
+  memoryDraft?: OperationalMemory;
 }
 
 export interface SlackApprovalRecord {
@@ -36,6 +51,10 @@ export interface SlackApprovalRecord {
   statusMessage: string;
   slackReference?: SlackMessageReference;
   messageUpdateAttempted?: boolean;
+  decisionClaim?: ApprovalDecision;
+  memory?: OperationalMemory;
+  mitigation?: LiveObstacleMitigation;
+  memoryWriteStatus: "NOT_REQUIRED" | "PENDING" | "SAVED" | "FAILED";
 }
 
 interface ApprovalStore {
@@ -76,6 +95,8 @@ export function createApprovalRecord(
       requestId,
       missionId: input.missionId,
       droneName: input.droneName,
+      vendorName: input.vendorName,
+      approvalKind: input.approvalKind,
       currentStatus: input.currentStatus,
       coordinates: input.coordinates,
       reason: input.reason,
@@ -84,6 +105,8 @@ export function createApprovalRecord(
       routeImpact: input.routeImpact,
       etaImpact: input.etaImpact,
       expiresAt: expiresAt.toISOString(),
+      liveObstacle: input.liveObstacle,
+      memoryDraft: input.memoryDraft,
     },
     status,
     transport,
@@ -92,6 +115,7 @@ export function createApprovalRecord(
     statusMessage: slackConfigured
       ? "Sending approval request to Slack."
       : "Slack credentials are missing. Use the clearly labelled DEMO_FALLBACK controls.",
+    memoryWriteStatus: "NOT_REQUIRED",
   };
 
   approvals.records.set(requestId, record);
@@ -130,19 +154,61 @@ export function applyApprovalDecision(
   decision: ApprovalDecision,
   operatorName: string,
 ): SlackApprovalRecord | null {
-  const current = getApprovalRecord(requestId);
-  if (!current) return null;
-  expireApprovalIfNeeded(current);
-  if (current.status !== "PENDING") return current;
+  const claim = claimApprovalDecision(requestId, decision);
+  if (!claim.record || !claim.claimed) return claim.record;
+  return finalizeApprovalDecision(requestId, decision, operatorName);
+}
 
+export function claimApprovalDecision(
+  requestId: string,
+  decision: ApprovalDecision,
+  mitigation?: LiveObstacleMitigation,
+): { record: SlackApprovalRecord | null; claimed: boolean } {
+  const current = getApprovalRecord(requestId);
+  if (!current) return { record: null, claimed: false };
+  const active = expireApprovalIfNeeded(current).record;
+  if (active.status !== "PENDING" || active.decisionClaim) {
+    return { record: active, claimed: false };
+  }
+  const claimed = updateRecord(requestId, (record) => ({
+    ...record,
+    decisionClaim: decision,
+    mitigation,
+    memoryWriteStatus:
+      decision === "approve" && record.approval.memoryDraft
+        ? "PENDING"
+        : "NOT_REQUIRED",
+    statusMessage:
+      decision === "approve" && record.approval.memoryDraft
+        ? "Operator approval received. Saving verified memory before rerouting."
+        : "Operator decision received.",
+  }));
+  return { record: claimed, claimed: true };
+}
+
+export function finalizeApprovalDecision(
+  requestId: string,
+  decision: ApprovalDecision,
+  operatorName: string,
+  options: {
+    memory?: OperationalMemory;
+    memoryWriteFailed?: boolean;
+    failureMessage?: string;
+    mitigation?: LiveObstacleMitigation;
+  } = {},
+): SlackApprovalRecord | null {
   const decisionState: Record<ApprovalDecision, Pick<SlackApprovalRecord, "status" | "statusMessage">> = {
     approve: {
       status: "APPROVED",
-      statusMessage: "Agent-recommended adjustment approved. The dashboard may continue with the reviewed controls.",
+      statusMessage: options.memory
+        ? options.mitigation === "CHOOSE_ALTERNATE_ROUTE"
+          ? "Alternate Route C approved. Verified hazard saved to Airtable."
+          : "Altitude adjustment approved. Verified hazard saved to Airtable; Route A may continue above the crane."
+        : "Agent-recommended adjustment approved. The dashboard may continue with the reviewed controls.",
     },
     hold: {
       status: "HELD",
-      statusMessage: "Operator kept the mission on hold. The drone remains safely paused.",
+      statusMessage: "Awaiting operator decision. The drone remains safely paused and no active memory was created.",
     },
     reject: {
       status: "REJECTED",
@@ -152,8 +218,29 @@ export function applyApprovalDecision(
 
   return updateRecord(requestId, (record) => ({
     ...record,
-    ...decisionState[decision],
+    ...(options.memoryWriteFailed
+      ? {
+          status: "HELD" as const,
+          statusMessage:
+            options.failureMessage ??
+            "Airtable persistence failed. The drone remains holding and no reroute is authorized.",
+        }
+      : decision === "reject" &&
+          record.approval.approvalKind === "LIVE_OBSTACLE_REROUTE"
+        ? {
+            status: "REJECTED" as const,
+            statusMessage:
+              "Operator selected Return Home. The package will not be delivered.",
+          }
+        : decisionState[decision]),
     operatorName,
+    mitigation: options.mitigation ?? record.mitigation,
+    memory: options.memory,
+    memoryWriteStatus: options.memoryWriteFailed
+      ? "FAILED"
+      : options.memory
+        ? "SAVED"
+        : "NOT_REQUIRED",
   }));
 }
 
@@ -198,6 +285,9 @@ export function toApprovalApiResponse(
     operatorName: record.operatorName,
     statusMessage: record.statusMessage,
     duplicate,
+    memory: record.memory,
+    memoryWriteStatus: record.memoryWriteStatus,
+    mitigation: record.mitigation,
   };
 }
 
@@ -223,4 +313,11 @@ function pruneExpiredRecords() {
       approvals.requestIdsByEvent.delete(record.idempotencyKey);
     }
   }
+}
+
+export function resetApprovalStoreForTests() {
+  globalThis.__droneSlackApprovalStore = {
+    records: new Map<string, SlackApprovalRecord>(),
+    requestIdsByEvent: new Map<string, string>(),
+  };
 }

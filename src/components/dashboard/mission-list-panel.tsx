@@ -19,6 +19,7 @@ const lifecycleClasses: Record<MissionLifecycle, string> = {
   READY: "bg-emerald-100 text-emerald-700",
   LAUNCHED: "bg-black text-white",
   IN_FLIGHT: "bg-black text-white",
+  RETURNING_HOME: "bg-amber-100 text-amber-700",
   DELIVERED: "bg-emerald-100 text-emerald-700",
   ABORTED: "bg-red-100 text-red-700",
 };

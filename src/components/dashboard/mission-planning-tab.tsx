@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import { preflightStepOrder } from "@/types/domain";
 import { MissionListPanel } from "@/components/dashboard/mission-list-panel";
 import { PreflightStepper } from "@/components/dashboard/preflight-stepper";
-import { StepEvidenceCard, StepHistoryRow } from "@/components/dashboard/step-evidence-card";
+import { StepEvidenceCard } from "@/components/dashboard/step-evidence-card";
 import { ApprovedPlanCard } from "@/components/dashboard/approved-plan-card";
 import { HumanInLoopPanel } from "@/components/live-mission/human-in-loop-panel";
 import type { MemoryMode, Mission, PreflightStepId, StepStatus, WeatherMode } from "@/types/domain";
@@ -51,11 +51,18 @@ export function MissionPlanningTab({
     preflightStepOrder.map((id) => [id, selectedMission?.steps[id].status ?? "Waiting"]),
   ) as Record<PreflightStepId, StepStatus>;
   const activeStep = selectedMission?.activeStepId ? selectedMission.steps[selectedMission.activeStepId] : null;
-  const historySteps = selectedMission
-    ? preflightStepOrder
-        .filter((id) => id !== selectedMission.activeStepId && selectedMission.steps[id].status !== "Waiting")
-        .map((id) => selectedMission.steps[id])
-    : [];
+  const isWeatherSelection =
+    activeStep?.id === "WEATHER" && activeStep.status === "Waiting";
+  const weatherSelectionReady =
+    isWeatherSelection &&
+    activeStep.input.length > 0 &&
+    (selectedMission?.weatherMode === "SAFE" ||
+      (selectedMission?.weatherMode === "MODERATE" &&
+        selectedMission.weatherApprovalGranted) ||
+      (selectedMission?.weatherMode === "LIVE" &&
+        selectedMission.weatherFetchState === "SUCCESS" &&
+        selectedMission.weatherEvaluation !== null &&
+        !selectedMission.weatherEvaluation.paused));
   const canRunPreflight = Boolean(selectedMission) && selectedMission?.lifecycle === "NEW" && !isRunningPreflight;
   const canLaunch = selectedMission?.lifecycle === "READY";
   const hasNextStep = Boolean(
@@ -68,7 +75,9 @@ export function MissionPlanningTab({
     hasNextStep &&
     !isRunningPreflight &&
     Boolean(activeStep) &&
-    activeStep?.status !== "Waiting" &&
+    (isWeatherSelection
+      ? weatherSelectionReady
+      : activeStep?.status !== "Waiting") &&
     activeStep?.status !== "Evaluating";
   const canChangeWeatherMode =
     Boolean(selectedMission) && selectedMission?.steps.WEATHER.status === "Waiting" && !isRunningPreflight;
@@ -90,11 +99,6 @@ export function MissionPlanningTab({
 
         <div className="flex shrink-0 items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <WeatherModeControl
-              disabled={!canChangeWeatherMode}
-              mode={selectedMission?.weatherMode ?? "LIVE"}
-              onChange={onWeatherModeChange}
-            />
             <MemoryModeControl
               disabled={!canChangeMemoryMode}
               mode={selectedMission?.memoryMode ?? "AIRTABLE"}
@@ -133,21 +137,24 @@ export function MissionPlanningTab({
           ) : activeStep ? (
             <StepEvidenceCard
               canAdvance={canAdvanceStep}
+              controls={
+                activeStep.id === "WEATHER" ? (
+                  <WeatherModeControl
+                    disabled={!canChangeWeatherMode}
+                    mode={selectedMission.weatherMode}
+                    onChange={onWeatherModeChange}
+                  />
+                ) : undefined
+              }
               isAdvancing={isRunningPreflight}
               onNext={onNextStep}
+              showAdvance={isWeatherSelection}
               step={activeStep}
             />
           ) : (
             <EmptyState message="Run Preflight to begin the sequential evaluation." />
           )}
 
-          {historySteps.length > 0 ? (
-            <div className="max-h-[132px] shrink-0 space-y-1.5 overflow-y-auto rounded-[18px] bg-white/60 p-1.5">
-              {historySteps.map((step) => (
-                <StepHistoryRow key={step.id} step={step} />
-              ))}
-            </div>
-          ) : null}
         </div>
 
         <ApprovedPlanCard
@@ -202,9 +209,8 @@ function MemoryModeControl({
 
 const weatherModes: Array<{ id: WeatherMode; label: string }> = [
   { id: "LIVE", label: "Live" },
-  { id: "SAFE", label: "Safe" },
   { id: "MODERATE", label: "Moderate" },
-  { id: "UNSAFE", label: "Unsafe" },
+  { id: "SAFE", label: "Safe" },
 ];
 
 function WeatherModeControl({

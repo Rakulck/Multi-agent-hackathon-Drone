@@ -1,15 +1,20 @@
 "use client";
 
-import { Bot, Database, Radio, Sparkles, UserCheck, Wind, type LucideIcon } from "lucide-react";
+import { Bot, Camera, Database, MessageSquareText, Radio, ShieldCheck, Sparkles, UserCheck, UserRound, Wind, type LucideIcon } from "lucide-react";
 import { Map as MapIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { IntegrationApp, IntegrationEvent, IntegrationStatus } from "@/types/domain";
 
 const appIcons: Record<IntegrationApp, LucideIcon> = {
+  "Drone Sensor": Camera,
   OpenWeather: Wind,
-  Agent: Bot,
-  Gemini: Sparkles,
+  "Mission Agent": Bot,
+  Twilio: MessageSquareText,
+  Customer: UserRound,
+  "Gemini 2.5 Flash": Sparkles,
+  "Deterministic Safety Engine": ShieldCheck,
   Airtable: Database,
+  "Route Updated": MapIcon,
   "Google Maps 3D": MapIcon,
   Slack: Radio,
   Operator: UserCheck,
@@ -30,6 +35,9 @@ export function IntegrationFlowPanel({ events }: IntegrationFlowPanelProps) {
   return (
     <div className="min-h-0 rounded-[22px] border border-neutral-200 bg-white p-3 shadow-[0_10px_28px_rgba(0,0,0,0.05)]">
       <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-neutral-500">Integration Flow</p>
+      <p className="mt-1 text-[9px] font-semibold leading-snug text-neutral-500">
+        Agent → Twilio update → Customer web choice → Safety validation → Destination updated
+      </p>
 
       {events.length === 0 ? (
         <p className="mt-2 text-[11px] font-medium text-neutral-400">No integration activity yet.</p>

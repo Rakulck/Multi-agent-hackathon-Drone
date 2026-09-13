@@ -219,7 +219,7 @@ export const GoogleMaps3DView = forwardRef<DroneMapHandle, GoogleMaps3DViewProps
 
         const altDropOffAMarker = new Marker3DElement({
           altitudeMode,
-          label: "Alternate Zone A",
+          label: "Terrace",
           position: scene.alternateDropOffA,
         });
         altDropOffAMarker.style.display = "none";
@@ -227,7 +227,7 @@ export const GoogleMaps3DView = forwardRef<DroneMapHandle, GoogleMaps3DViewProps
 
         const altDropOffBMarker = new Marker3DElement({
           altitudeMode,
-          label: "Alternate Zone B",
+          label: "Front Entrance",
           position: scene.alternateDropOffB,
         });
         altDropOffBMarker.style.display = "none";

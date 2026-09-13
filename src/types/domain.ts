@@ -23,6 +23,7 @@ export type MissionState =
   | "OBSTACLE DETECTED"
   | "MEMORY SAVED"
   | "REROUTING"
+  | "RETURNING_HOME"
   | "DELIVERED"
   | "ABORTED";
 
@@ -125,8 +126,11 @@ export interface OperationalMemory {
   sourceVendor: string;
   sourceMission: string;
   status: "Active" | "Inactive";
+  verificationStatus: "Awaiting Verification" | "Human Verified";
+  verifiedAt?: string;
+  verifiedBy?: string;
   dataSource: MemoryDataSource;
-  airtableStatus: "saving" | "saved" | "failed" | "fallback";
+  airtableStatus: "draft" | "saving" | "saved" | "failed" | "fallback";
 }
 
 export type MemoryDataSource = "AIRTABLE" | "DEMO_FALLBACK";
@@ -137,6 +141,7 @@ export type MemoryFetchState =
   | "IDLE"
   | "LOADING"
   | "SUCCESS"
+  | "SUCCESS_EMPTY"
   | "TIMEOUT"
   | "MISSING_KEY"
   | "INVALID_RESPONSE"
@@ -149,6 +154,7 @@ export interface MemoryApiResponse {
   source: MemoryDataSource;
   duplicate?: boolean;
   airtableRecordId?: string;
+  presetIsolation?: boolean;
   upstream?: {
     statusCode: number;
     errorType?: string;
@@ -189,7 +195,8 @@ export type ApprovalCategory =
   | "Uncertain battery reserve"
   | "Blocked drop-off zone"
   | "Missing safety data"
-  | "Mission caution review";
+  | "Mission caution review"
+  | "Live obstacle reroute";
 
 export interface ApprovalRequest {
   category: ApprovalCategory;
@@ -206,9 +213,13 @@ export interface ApprovalRequest {
   operatorName?: string;
   statusMessage?: string;
   risks?: MissionRiskCondition[];
+  approvalKind?: SlackApprovalKind;
 }
 
 export type ApprovalDecision = "approve" | "hold" | "reject";
+export type LiveObstacleMitigation =
+  | "ADJUST_ALTITUDE"
+  | "CHOOSE_ALTERNATE_ROUTE";
 
 export type ApprovalTransport = "SLACK" | "DEMO_FALLBACK";
 
@@ -233,7 +244,12 @@ export interface SlackApprovalApiResponse {
   operatorName?: string;
   statusMessage: string;
   duplicate: boolean;
+  memory?: OperationalMemory;
+  memoryWriteStatus?: "NOT_REQUIRED" | "PENDING" | "SAVED" | "FAILED";
+  mitigation?: LiveObstacleMitigation;
 }
+
+export type SlackApprovalKind = "GENERAL_CAUTION" | "LIVE_OBSTACLE_REROUTE";
 
 export type MissionDecisionLevel = "SAFE" | "CAUTION" | "UNSAFE";
 
@@ -271,10 +287,15 @@ export interface DropOffZone {
 
 /** External applications surfaced in the Live Mission "Integration Flow" panel. */
 export type IntegrationApp =
+  | "Drone Sensor"
   | "OpenWeather"
-  | "Agent"
-  | "Gemini"
+  | "Mission Agent"
+  | "Twilio"
+  | "Customer"
+  | "Gemini 2.5 Flash"
+  | "Deterministic Safety Engine"
   | "Airtable"
+  | "Route Updated"
   | "Google Maps 3D"
   | "Slack"
   | "Operator";
@@ -287,6 +308,107 @@ export interface IntegrationEvent {
   result: string;
   status: IntegrationStatus;
   timestamp: string;
+}
+
+export type CustomerMessageEventType =
+  | "DISPATCHED_TO_PICKUP"
+  | "PACKAGE_PICKED_UP"
+  | "APPROACHING_DESTINATION"
+  | "ALTERNATE_DROPOFF_REQUIRED"
+  | "DELIVERED";
+
+export type CustomerMessageStatus = "queued" | "sent" | "delivered" | "failed";
+
+export type CustomerCommunicationTransport = "TWILIO" | "DEMO_FALLBACK";
+
+export interface CustomerMessageEvent {
+  eventType: CustomerMessageEventType;
+  messageSid: string | null;
+  status: CustomerMessageStatus;
+  timestamp: string;
+  transport: CustomerCommunicationTransport;
+  errorCode?: string;
+}
+
+export interface CustomerCommunicationSnapshot {
+  missionId: string;
+  recipientMasked: string;
+  transport: CustomerCommunicationTransport;
+  events: CustomerMessageEvent[];
+  waitingForReply: boolean;
+  replyReceived: boolean;
+  selectedAlternative: "Terrace" | "Front Entrance" | null;
+  safetyValidation: "PENDING" | "SAFE" | "UNSAFE" | null;
+  safetyReason: string | null;
+  updatedDropOff: "Terrace" | "Front Entrance" | null;
+  operatorReviewRequested: boolean;
+  updatedAt: string;
+}
+
+export type GeminiAnalysisMode = "LIVE" | "DEMO_FALLBACK";
+
+export type GeminiAnalysisStatus =
+  | "SUCCESS"
+  | "GEMINI_API_FAILURE"
+  | "INVALID_REQUEST";
+
+export type GeminiObservationSource = "GEMINI" | "DEMO_FALLBACK";
+
+export interface GeminiObstacleObservation {
+  obstacleDetected: boolean;
+  obstacleType: "CONSTRUCTION_CRANE";
+  description: string;
+  confidence: number;
+  estimatedCoordinates: {
+    latitude: number;
+    longitude: number;
+  };
+  minimumAltitudeM: number;
+  maximumAltitudeM: number;
+  recommendedMemoryTtlMinutes: number;
+}
+
+export type ObstacleSafetyAction =
+  | "CONTINUE"
+  | "REROUTE"
+  | "HOLD_FOR_HUMAN_REVIEW"
+  | "GEMINI_API_FAILURE";
+
+export interface ObstacleSafetyDecision {
+  action: ObstacleSafetyAction;
+  reason: string;
+  affectedRoute: RouteId | null;
+  routeOverlap: boolean;
+  altitudeOverlap: boolean;
+  relevantForMemory: boolean;
+}
+
+export type VisionAnalysisPhase =
+  | "IDLE"
+  | "ANALYZING"
+  | "COMPLETE"
+  | "FAILED";
+
+export type VisionMemorySaveStatus =
+  | "NOT_APPLICABLE"
+  | "AWAITING_APPROVAL"
+  | "SAVED"
+  | "DUPLICATE"
+  | "FAILED"
+  | "DEMO_FALLBACK_PENDING";
+
+export interface GeminiObstacleApiResponse {
+  status: GeminiAnalysisStatus;
+  source: GeminiObservationSource | null;
+  model: string;
+  message: string;
+  latencyMs: number;
+  schemaValidation: boolean;
+  observation: GeminiObstacleObservation | null;
+  decision: ObstacleSafetyDecision;
+  memory: OperationalMemory | null;
+  memorySaveStatus: VisionMemorySaveStatus;
+  memorySaveMessage: string;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -307,12 +429,17 @@ export interface GeoAddress {
 }
 
 export interface NewMissionInput {
+  customerName?: string;
   deliveryType: DeliveryType;
   weightKg: number;
   pickup: string;
   drop: string;
   priority: MissionPriority;
   dropOffPreference: DropOffPreference;
+  /** A custom number is used only during server registration and then removed from client mission state. */
+  recipientPhone?: string;
+  recipientPhoneMasked?: string;
+  useDemoRecipient: boolean;
   /** Set once the `pickup` text has been geocoded to a real coordinate. */
   pickupPlace?: GeoAddress;
   /** Set once the `drop` text has been geocoded to a real coordinate. */
@@ -359,6 +486,7 @@ export type MissionLifecycle =
   | "READY"
   | "LAUNCHED"
   | "IN_FLIGHT"
+  | "RETURNING_HOME"
   | "DELIVERED"
   | "ABORTED";
 
@@ -527,6 +655,7 @@ export interface Mission {
   input: NewMissionInput;
   lifecycle: MissionLifecycle;
   pattern: MissionRun;
+  isDemoPreset: boolean;
   steps: Record<PreflightStepId, StepEvidence>;
   activeStepId: PreflightStepId | null;
   fleetEligibility: FleetEvalRow[] | null;
@@ -537,6 +666,7 @@ export interface Mission {
   weatherFetchMessage: string | null;
   weather: WeatherSnapshotData | null;
   weatherEvaluation: WeatherEvaluation | null;
+  weatherApprovalGranted: boolean;
   memoryMode: MemoryMode;
   memoryFetchState: MemoryFetchState;
   memoryFetchMessage: string | null;
@@ -551,6 +681,7 @@ export interface Mission {
   approvalRequired: boolean;
   plan: ApprovedPlan | null;
   mapScene: MissionMapScene;
+  customerCommunication: CustomerCommunicationSnapshot | null;
 }
 
 export type ConnectionState = "online" | "offline";

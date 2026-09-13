@@ -24,11 +24,13 @@ export const defaultNewMissionInput: NewMissionInput = {
   drop: "",
   priority: "Express",
   dropOffPreference: "Courtyard",
+  recipientPhone: "",
+  useDemoRecipient: true,
 };
 
 interface NewMissionModalProps {
   onCancel: () => void;
-  onCreate: (input: NewMissionInput) => void;
+  onCreate: (input: NewMissionInput) => Promise<void> | void;
 }
 
 export function NewMissionModal({ onCancel, onCreate }: NewMissionModalProps) {
@@ -50,6 +52,8 @@ export function NewMissionModal({ onCancel, onCreate }: NewMissionModalProps) {
       : null;
 
   const distanceTooLarge = distanceMiles !== null && distanceMiles > MAX_MISSION_DISTANCE_MILES;
+  const recipientPhoneValid =
+    form.useDemoRecipient || /^\+[1-9]\d{7,14}$/.test(form.recipientPhone?.trim() ?? "");
 
   async function resolveAddress(address: string): Promise<GeoAddress | null> {
     const result = await geocodeAddress(address);
@@ -57,7 +61,7 @@ export function NewMissionModal({ onCancel, onCreate }: NewMissionModalProps) {
   }
 
   async function handleCreate() {
-    if (isCreating || distanceTooLarge) {
+    if (isCreating || distanceTooLarge || !recipientPhoneValid) {
       return;
     }
     setIsCreating(true);
@@ -99,19 +103,25 @@ export function NewMissionModal({ onCancel, onCreate }: NewMissionModalProps) {
       }
     }
 
-    setIsCreating(false);
-    onCreate({
-      ...form,
-      pickup: resolvedPickup?.label ?? form.pickup,
-      drop: resolvedDrop?.label ?? form.drop,
-      pickupPlace: resolvedPickup ?? undefined,
-      dropPlace: resolvedDrop ?? undefined,
-    });
+    try {
+      await onCreate({
+        ...form,
+        recipientPhone: form.useDemoRecipient
+          ? undefined
+          : form.recipientPhone?.trim(),
+        pickup: resolvedPickup?.label ?? form.pickup,
+        drop: resolvedDrop?.label ?? form.drop,
+        pickupPlace: resolvedPickup ?? undefined,
+        dropPlace: resolvedDrop ?? undefined,
+      });
+    } finally {
+      setIsCreating(false);
+    }
   }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-md rounded-[28px] border border-neutral-200 bg-white p-5 shadow-[0_30px_80px_rgba(0,0,0,0.25)]">
+      <div className="max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto rounded-[28px] border border-neutral-200 bg-white p-5 shadow-[0_30px_80px_rgba(0,0,0,0.25)]">
         <div className="flex items-start justify-between">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-neutral-500">New Mission</p>
@@ -227,6 +237,50 @@ export function NewMissionModal({ onCancel, onCreate }: NewMissionModalProps) {
               onChange={(dropOffPreference) => setForm((current) => ({ ...current, dropOffPreference }))}
             />
           </Field>
+
+          <Field label="Recipient phone (E.164)">
+            <input
+              type="tel"
+              inputMode="tel"
+              placeholder="+14155550123"
+              value={form.recipientPhone ?? ""}
+              disabled={form.useDemoRecipient}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  recipientPhone: event.target.value,
+                }))
+              }
+              className="w-full rounded-2xl border border-neutral-200 bg-white px-3 py-2 text-sm font-semibold text-black outline-none disabled:bg-neutral-100 disabled:text-neutral-400 focus:border-black"
+            />
+            {!form.useDemoRecipient && !recipientPhoneValid ? (
+              <span className="mt-1 block text-[10px] font-semibold text-amber-600">
+                Enter a valid E.164 number, including the leading + and country code.
+              </span>
+            ) : null}
+          </Field>
+
+          <label className="flex items-start gap-2 rounded-2xl border border-neutral-200 bg-neutral-50 px-3 py-2">
+            <input
+              type="checkbox"
+              checked={form.useDemoRecipient}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  useDemoRecipient: event.target.checked,
+                }))
+              }
+              className="mt-0.5 h-4 w-4 accent-black"
+            />
+            <span>
+              <span className="block text-[11px] font-bold text-black">
+                Use server-side TWILIO_DEMO_RECIPIENT
+              </span>
+              <span className="block text-[10px] font-medium text-neutral-500">
+                Demo default; the full number is never exposed in the browser.
+              </span>
+            </span>
+          </label>
         </div>
 
         <div className="mt-5 grid grid-cols-2 gap-2">
@@ -239,11 +293,11 @@ export function NewMissionModal({ onCancel, onCreate }: NewMissionModalProps) {
           </button>
           <button
             type="button"
-            disabled={isCreating || distanceTooLarge}
+            disabled={isCreating || distanceTooLarge || !recipientPhoneValid}
             onClick={() => void handleCreate()}
             className={cn(
               "inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl border border-black bg-black text-sm font-bold uppercase tracking-[0.06em] text-white transition hover:bg-neutral-800",
-              (isCreating || distanceTooLarge) && "cursor-not-allowed opacity-70",
+              (isCreating || distanceTooLarge || !recipientPhoneValid) && "cursor-not-allowed opacity-70",
             )}
           >
             {isCreating ? (
@@ -253,6 +307,8 @@ export function NewMissionModal({ onCancel, onCreate }: NewMissionModalProps) {
               </>
             ) : distanceTooLarge ? (
               "Distance Too Large"
+            ) : !recipientPhoneValid ? (
+              "Invalid Phone"
             ) : (
               "Create Mission"
             )}

@@ -227,6 +227,106 @@ export const defaultMapScene: MissionMapScene = buildMissionMapScene({
   isCustomAddress: false,
 });
 
+/**
+ * Fixed demo geometry for two unrelated trips that converge on the same
+ * northbound Financial District/Embarcadero corridor.
+ */
+export const sharedDemoCorridor = {
+  id: "SF-FIDI-EMBARCADERO-NORTHBOUND",
+  waypoints: [
+    { lat: 37.79635, lng: -122.39642, altitude: 136 },
+    { lat: 37.7982, lng: -122.39735, altitude: 138 },
+    { lat: 37.80005, lng: -122.39852, altitude: 136 },
+  ] satisfies GeoPoint3D[],
+};
+
+export function buildSharedCorridorDemoScene(
+  pattern: "MISSION_1" | "MISSION_2",
+  input: { pickupPlace: { label: string; lat: number; lng: number }; dropPlace: { label: string; lat: number; lng: number } },
+): MissionMapScene {
+  const origin = {
+    lat: input.pickupPlace.lat,
+    lng: input.pickupPlace.lng,
+    altitude: dispatchOrigin.altitude,
+  };
+  const destination = {
+    lat: input.dropPlace.lat,
+    lng: input.dropPlace.lng,
+    altitude: apartmentDestination.altitude,
+  };
+  const scene = buildMissionMapScene({
+    origin,
+    destination,
+    originLabel: input.pickupPlace.label,
+    destinationLabel: input.dropPlace.label,
+    isCustomAddress: true,
+  });
+  const routeA = scene.routes.find((route) => route.id === "A")!;
+  const approach =
+    pattern === "MISSION_1"
+      ? { lat: 37.7947, lng: -122.39552, altitude: 128 }
+      : { lat: 37.79272, lng: -122.39562, altitude: 128 };
+  const exit =
+    pattern === "MISSION_1"
+      ? { lat: 37.79875, lng: -122.39812, altitude: 126 }
+      : { lat: 37.8044, lng: -122.4029, altitude: 126 };
+  const hazardCenter = sharedDemoCorridor.waypoints[1];
+
+  return {
+    ...scene,
+    routes: scene.routes.map((route) => {
+      if (route.id === "A") {
+        return {
+            ...routeA,
+            label: sharedDemoCorridor.id,
+            waypoints: [
+              origin,
+              approach,
+              ...sharedDemoCorridor.waypoints,
+              exit,
+              destination,
+            ],
+          };
+      }
+      if (pattern === "MISSION_2" && route.id === "B") {
+        return {
+          ...route,
+          waypoints: [
+            origin,
+            { lat: 37.7938, lng: -122.3928, altitude: 124 },
+            { lat: 37.7998, lng: -122.3921, altitude: 128 },
+            { lat: 37.8048, lng: -122.4018, altitude: 122 },
+            destination,
+          ],
+        };
+      }
+      if (pattern === "MISSION_2" && route.id === "C") {
+        return {
+          ...route,
+          waypoints: [
+            origin,
+            { lat: 37.7942, lng: -122.4028, altitude: 134 },
+            { lat: 37.7992, lng: -122.4058, altitude: 142 },
+            { lat: 37.8051, lng: -122.4091, altitude: 134 },
+            destination,
+          ],
+        };
+      }
+      return route;
+    }),
+    hazard: {
+      ...scene.hazard,
+      center: hazardCenter,
+      polygon: [
+        { lat: hazardCenter.lat - 0.00035, lng: hazardCenter.lng - 0.0004, altitude: 90 },
+        { lat: hazardCenter.lat + 0.00035, lng: hazardCenter.lng - 0.0004, altitude: 90 },
+        { lat: hazardCenter.lat + 0.00035, lng: hazardCenter.lng + 0.0004, altitude: 90 },
+        { lat: hazardCenter.lat - 0.00035, lng: hazardCenter.lng + 0.0004, altitude: 90 },
+      ],
+    },
+  };
+}
+
 /** Derives camera fly-to presets for a scene, scaling the overview range to fit the real distance. */
 export function buildCameraPresetsForScene(scene: MissionMapScene): Record<CameraPresetId, CameraPresetDefinition> {
   const pathDistanceM = haversineKm(scene.origin, scene.destination) * 1000;

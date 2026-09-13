@@ -10,11 +10,20 @@ const requiredEnvNames = [
   "SLACK_SIGNING_SECRET",
   "TWILIO_ACCOUNT_SID",
   "TWILIO_AUTH_TOKEN",
-  "TWILIO_FROM_NUMBER",
-  "TWILIO_TO_NUMBER",
+  "TWILIO_PHONE_NUMBER",
+  "TWILIO_DEMO_RECIPIENT",
+  "PUBLIC_APP_URL",
 ] as const;
 
-const optionalEnvNames = ["TWILIO_API_KEY_SID", "TWILIO_API_KEY_SECRET", "LEMMA_API_KEY"] as const;
+const optionalEnvNames = [
+  "GEMINI_MODEL",
+  "LEMMA_API_KEY",
+  "TWILIO_API_KEY_SID",
+  "TWILIO_API_KEY_SECRET",
+  "TWILIO_FROM_NUMBER",
+  "TWILIO_TO_NUMBER",
+  "DELIVERY_CHOICE_SIGNING_SECRET",
+] as const;
 
 export type RequiredEnvName = (typeof requiredEnvNames)[number];
 export type OptionalEnvName = (typeof optionalEnvNames)[number];

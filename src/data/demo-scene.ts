@@ -46,14 +46,14 @@ export const scenePrimaryDestination: DropOffZoneDefinition = {
 
 export const alternateDropOffA: DropOffZoneDefinition = {
   id: "DZ-ALT-A",
-  label: "Alternate Zone A",
+  label: "Terrace",
   position: toWaypoint(alternateDropOffZone.point),
   role: "alternate",
 };
 
 export const alternateDropOffB: DropOffZoneDefinition = {
   id: "DZ-ALT-B",
-  label: "Alternate Zone B",
+  label: "Front Entrance",
   position: {
     lat: alternateDropOffZone.point.lat + 0.00085,
     lng: alternateDropOffZone.point.lng - 0.00065,

@@ -22,6 +22,9 @@ const memorySchema = z.object({
   sourceVendor: z.string().min(1),
   sourceMission: z.string().min(1),
   status: z.literal("Active"),
+  verificationStatus: z.literal("Human Verified"),
+  verifiedAt: z.string().datetime(),
+  verifiedBy: z.string().min(1),
   dataSource: z.enum(["AIRTABLE", "DEMO_FALLBACK"]),
   airtableStatus: z.enum(["saving", "saved", "failed", "fallback"]),
 });
@@ -62,6 +65,7 @@ function invalidResponse(message: string): MemoryApiResponse {
 function httpStatusForMemoryResponse(response: MemoryApiResponse): number {
   switch (response.status) {
     case "SUCCESS":
+    case "SUCCESS_EMPTY":
       return 200;
     case "INVALID_RESPONSE":
       return 400;

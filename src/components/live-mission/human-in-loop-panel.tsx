@@ -68,10 +68,14 @@ export function HumanInLoopPanel({
             DEMO_FALLBACK controls · not Slack actions
           </p>
           <div className="mt-1.5 grid grid-cols-3 gap-1.5">
-            <ApprovalButton onClick={() => onResolveApproval("approve")}>Approve Adjustment</ApprovalButton>
-            <ApprovalButton onClick={() => onResolveApproval("hold")}>Keep Hold</ApprovalButton>
+            <ApprovalButton onClick={() => onResolveApproval("approve")}>
+              {approval.approvalKind === "LIVE_OBSTACLE_REROUTE" ? "Adjust Altitude" : "Approve Adjustment"}
+            </ApprovalButton>
+            <ApprovalButton onClick={() => onResolveApproval("hold")}>
+              {approval.approvalKind === "LIVE_OBSTACLE_REROUTE" ? "Keep Holding" : "Keep Hold"}
+            </ApprovalButton>
             <ApprovalButton onClick={() => onResolveApproval("reject")} isDanger>
-              Reject Mission
+              {approval.approvalKind === "LIVE_OBSTACLE_REROUTE" ? "Return Home" : "Reject Mission"}
             </ApprovalButton>
           </div>
         </>
@@ -93,7 +97,7 @@ function approvalStatusLabel(approval: ApprovalRequest) {
     case "APPROVED":
       return `Approved${approval.operatorName ? ` by ${approval.operatorName}` : ""}`;
     case "HELD":
-      return `Mission held${approval.operatorName ? ` by ${approval.operatorName}` : ""}`;
+      return `Awaiting operator decision${approval.operatorName ? ` · held by ${approval.operatorName}` : ""}`;
     case "REJECTED":
       return `Mission rejected${approval.operatorName ? ` by ${approval.operatorName}` : ""}`;
     case "TIMED_OUT":

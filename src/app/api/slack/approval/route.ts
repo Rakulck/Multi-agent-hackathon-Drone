@@ -24,6 +24,10 @@ const createApprovalSchema = z.object({
   idempotencyKey: z.string().min(1).max(200),
   missionId: z.string().min(1).max(100),
   droneName: z.string().min(1).max(100),
+  vendorName: z.string().min(1).max(100).optional(),
+  approvalKind: z
+    .enum(["GENERAL_CAUTION", "LIVE_OBSTACLE_REROUTE"])
+    .default("GENERAL_CAUTION"),
   currentStatus: z.string().min(1).max(100),
   coordinates: z.object({
     lat: z.number().finite().min(-90).max(90),
@@ -57,6 +61,50 @@ const createApprovalSchema = z.object({
   proposedAlternative: z.string().min(1).max(500),
   routeImpact: z.string().min(1).max(500),
   etaImpact: z.string().min(1).max(200),
+  liveObstacle: z
+    .object({
+      detectedObstacle: z.string().min(1).max(200),
+      geminiConfidence: z.number().finite().min(0).max(1),
+      currentRoute: z.enum(["A", "B", "C"]),
+      recommendedRoute: z.enum(["A", "B", "C"]),
+      recommendedAltitudeM: z.number().finite().min(0).max(1_000),
+      rejectionReason: z.string().min(1).max(1_000),
+    })
+    .optional(),
+  memoryDraft: z
+    .object({
+      id: z.string().min(1),
+      learnedBy: z.string().min(1),
+      routeId: z.enum(["A", "B", "C"]),
+      hazardType: z.string().min(1),
+      latitude: z.number().finite().min(-90).max(90),
+      longitude: z.number().finite().min(-180).max(180),
+      severity: z.enum(["Low", "Medium", "High"]),
+      confidence: z.number().finite().min(0).max(1),
+      createdAt: z.string().datetime(),
+      expiresAt: z.string().datetime(),
+      summary: z.string().min(1),
+      altitudeBandM: z.tuple([z.number().finite(), z.number().finite()]),
+      avoidanceRadiusM: z.number().finite().positive(),
+      sourceVendor: z.string().min(1),
+      sourceMission: z.string().min(1),
+      status: z.literal("Inactive"),
+      verificationStatus: z.literal("Awaiting Verification"),
+      dataSource: z.enum(["AIRTABLE", "DEMO_FALLBACK"]),
+      airtableStatus: z.literal("draft"),
+    })
+    .optional(),
+}).superRefine((value, context) => {
+  if (
+    value.approvalKind === "LIVE_OBSTACLE_REROUTE" &&
+    (!value.liveObstacle || !value.memoryDraft || !value.vendorName)
+  ) {
+    context.addIssue({
+      code: "custom",
+      message:
+        "Live obstacle approvals require vendor, obstacle, and memory-draft details.",
+    });
+  }
 });
 
 export async function POST(request: Request) {

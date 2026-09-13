@@ -35,3 +35,24 @@ select {
 .font-geist {
   font-family: var(--font-geist);
 }
+
+@keyframes twilio-toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(16px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+.twilio-toast-enter {
+  animation: twilio-toast-in 280ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .twilio-toast-enter {
+    animation: none;
+  }
+}
