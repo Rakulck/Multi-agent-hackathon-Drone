@@ -23,7 +23,8 @@ export type MissionState =
   | "OBSTACLE DETECTED"
   | "MEMORY SAVED"
   | "REROUTING"
-  | "DELIVERED";
+  | "DELIVERED"
+  | "ABORTED";
 
 export type RouteId = "A" | "B" | "C";
 
@@ -107,10 +108,13 @@ export interface HazardZone {
 
 export interface OperationalMemory {
   id: string;
+  airtableRecordId?: string;
   learnedBy: string;
   usedBy?: string;
   routeId: RouteId;
   hazardType: string;
+  latitude: number;
+  longitude: number;
   severity: "Low" | "Medium" | "High";
   confidence: number;
   createdAt: string;
@@ -118,7 +122,47 @@ export interface OperationalMemory {
   summary: string;
   altitudeBandM: [number, number];
   avoidanceRadiusM: number;
-  airtableStatus: "saving" | "saved";
+  sourceVendor: string;
+  sourceMission: string;
+  status: "Active" | "Inactive";
+  dataSource: MemoryDataSource;
+  airtableStatus: "saving" | "saved" | "failed" | "fallback";
+}
+
+export type MemoryDataSource = "AIRTABLE" | "DEMO_FALLBACK";
+
+export type MemoryMode = "AIRTABLE" | "DEMO_FALLBACK";
+
+export type MemoryFetchState =
+  | "IDLE"
+  | "LOADING"
+  | "SUCCESS"
+  | "TIMEOUT"
+  | "MISSING_KEY"
+  | "INVALID_RESPONSE"
+  | "API_FAILURE";
+
+export interface MemoryApiResponse {
+  status: Exclude<MemoryFetchState, "IDLE" | "LOADING">;
+  memories: OperationalMemory[];
+  message: string;
+  source: MemoryDataSource;
+  duplicate?: boolean;
+  airtableRecordId?: string;
+  upstream?: {
+    statusCode: number;
+    errorType?: string;
+    message: string;
+  };
+}
+
+export interface MemoryRouteMatch {
+  memoryId: string;
+  routeId: RouteId;
+  distanceM: number;
+  altitudeOverlap: boolean;
+  matched: boolean;
+  reason: string;
 }
 
 /** Top-level product surfaces. */
@@ -144,15 +188,80 @@ export type ApprovalCategory =
   | "Borderline weather"
   | "Uncertain battery reserve"
   | "Blocked drop-off zone"
-  | "Missing safety data";
+  | "Missing safety data"
+  | "Mission caution review";
 
 export interface ApprovalRequest {
   category: ApprovalCategory;
   reason: string;
   recommendedAction: string;
+  requestId: string | null;
+  status: SlackApprovalStatus;
+  transport: ApprovalTransport;
+  missionId?: string;
+  droneName?: string;
+  proposedAlternative?: string;
+  routeImpact?: string;
+  expiresAt?: string;
+  operatorName?: string;
+  statusMessage?: string;
+  risks?: MissionRiskCondition[];
 }
 
-export type ApprovalDecision = "approve-reroute" | "return-home" | "cancel-mission";
+export type ApprovalDecision = "approve" | "hold" | "reject";
+
+export type ApprovalTransport = "SLACK" | "DEMO_FALLBACK";
+
+export type SlackApprovalStatus =
+  | "SENDING"
+  | "PENDING"
+  | "APPROVED"
+  | "HELD"
+  | "REJECTED"
+  | "TIMED_OUT"
+  | "SLACK_UNAVAILABLE"
+  | "SLACK_API_FAILED"
+  | "SLACK_UPDATE_FAILED";
+
+export interface SlackApprovalApiResponse {
+  requestId: string;
+  status: SlackApprovalStatus;
+  transport: ApprovalTransport;
+  missionId: string;
+  createdAt: string;
+  expiresAt: string;
+  operatorName?: string;
+  statusMessage: string;
+  duplicate: boolean;
+}
+
+export type MissionDecisionLevel = "SAFE" | "CAUTION" | "UNSAFE";
+
+export type MissionRiskKind =
+  | "WEATHER_MARGIN"
+  | "BATTERY_RESERVE"
+  | "OBSTACLE_CONFIDENCE"
+  | "AIRSPACE_PROXIMITY"
+  | "ROUTE_ADJUSTMENT"
+  | "DELIVERY_ZONE"
+  | "HARD_SAFETY_LIMIT";
+
+export interface MissionRiskCondition {
+  id: string;
+  kind: MissionRiskKind;
+  level: Exclude<MissionDecisionLevel, "SAFE">;
+  riskDetected: string;
+  currentValue: string;
+  allowedLimit: string;
+  agentRecommendation: string;
+  proposedAdjustment: string;
+}
+
+export interface MissionRiskReview {
+  level: MissionDecisionLevel;
+  conditions: MissionRiskCondition[];
+  summary: string;
+}
 
 export interface DropOffZone {
   id: string;
@@ -250,15 +359,16 @@ export type MissionLifecycle =
   | "READY"
   | "LAUNCHED"
   | "IN_FLIGHT"
-  | "DELIVERED";
+  | "DELIVERED"
+  | "ABORTED";
 
 export const preflightStepOrder = [
   "REQUEST",
   "FLEET",
   "WEATHER",
-  "ROUTES",
   "AIRSPACE",
   "MEMORY",
+  "ROUTES",
   "APPROVAL",
   "READY",
 ] as const;
@@ -427,11 +537,17 @@ export interface Mission {
   weatherFetchMessage: string | null;
   weather: WeatherSnapshotData | null;
   weatherEvaluation: WeatherEvaluation | null;
+  memoryMode: MemoryMode;
+  memoryFetchState: MemoryFetchState;
+  memoryFetchMessage: string | null;
+  memories: OperationalMemory[];
+  memoryMatches: MemoryRouteMatch[];
   cruiseSpeedMph: number | null;
   etaDeltaMin: number;
   routeEval: RouteEvalRow[] | null;
   selectedRoute: RouteId | null;
   airspaceEval: AirspaceEval | null;
+  riskReview: MissionRiskReview | null;
   approvalRequired: boolean;
   plan: ApprovedPlan | null;
   mapScene: MissionMapScene;

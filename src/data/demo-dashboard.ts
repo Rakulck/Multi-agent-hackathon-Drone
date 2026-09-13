@@ -10,7 +10,7 @@ import type {
 
 export const connectionIndicators: ConnectionIndicator[] = [
   { name: "Maps", status: "placeholder" },
-  { name: "Airtable", status: "placeholder" },
+  { name: "Airtable", status: "connected" },
   { name: "Slack", status: "placeholder" },
   { name: "Weather", status: "placeholder" },
   { name: "Gemini", status: "placeholder" },
@@ -111,7 +111,7 @@ export const timelineEvents: TimelineEvent[] = [
   {
     time: "--:--",
     title: "Integration events pending",
-    detail: "Airtable, Slack, and Gemini remain unchanged while weather is evaluated server-side.",
+    detail: "Airtable memory and weather run server-side; Slack and Gemini remain unchanged.",
     variant: "empty",
   },
 ];

@@ -7,14 +7,19 @@ import { MissionListPanel } from "@/components/dashboard/mission-list-panel";
 import { PreflightStepper } from "@/components/dashboard/preflight-stepper";
 import { StepEvidenceCard, StepHistoryRow } from "@/components/dashboard/step-evidence-card";
 import { ApprovedPlanCard } from "@/components/dashboard/approved-plan-card";
-import type { Mission, PreflightStepId, StepStatus, WeatherMode } from "@/types/domain";
+import { HumanInLoopPanel } from "@/components/live-mission/human-in-loop-panel";
+import type { MemoryMode, Mission, PreflightStepId, StepStatus, WeatherMode } from "@/types/domain";
+import type { ApprovalDecision, ApprovalRequest } from "@/types/domain";
 
 interface MissionPlanningTabProps {
+  approval: ApprovalRequest | null;
   isLaunching: boolean;
   isRunningPreflight: boolean;
   missions: Mission[];
   onCreatePreset: (pattern: Mission["pattern"]) => void;
   onLaunchMission: () => void;
+  onMemoryModeChange: (mode: MemoryMode) => void;
+  onResolveApproval: (decision: ApprovalDecision) => void;
   onNewMission: () => void;
   onNextStep: () => void;
   onReset: () => void;
@@ -25,11 +30,14 @@ interface MissionPlanningTabProps {
 }
 
 export function MissionPlanningTab({
+  approval,
   isLaunching,
   isRunningPreflight,
   missions,
   onCreatePreset,
   onLaunchMission,
+  onMemoryModeChange,
+  onResolveApproval,
   onNewMission,
   onNextStep,
   onReset,
@@ -64,6 +72,8 @@ export function MissionPlanningTab({
     activeStep?.status !== "Evaluating";
   const canChangeWeatherMode =
     Boolean(selectedMission) && selectedMission?.steps.WEATHER.status === "Waiting" && !isRunningPreflight;
+  const canChangeMemoryMode =
+    Boolean(selectedMission) && selectedMission?.steps.MEMORY.status === "Waiting" && !isRunningPreflight;
 
   return (
     <section className="grid min-h-0 flex-1 grid-cols-[22%_78%] gap-3">
@@ -79,11 +89,18 @@ export function MissionPlanningTab({
         <SummaryRow items={summary} />
 
         <div className="flex shrink-0 items-center justify-between gap-2">
-          <WeatherModeControl
-            disabled={!canChangeWeatherMode}
-            mode={selectedMission?.weatherMode ?? "LIVE"}
-            onChange={onWeatherModeChange}
-          />
+          <div className="flex items-center gap-2">
+            <WeatherModeControl
+              disabled={!canChangeWeatherMode}
+              mode={selectedMission?.weatherMode ?? "LIVE"}
+              onChange={onWeatherModeChange}
+            />
+            <MemoryModeControl
+              disabled={!canChangeMemoryMode}
+              mode={selectedMission?.memoryMode ?? "AIRTABLE"}
+              onChange={onMemoryModeChange}
+            />
+          </div>
           <button
             type="button"
             disabled={!canRunPreflight}
@@ -139,8 +156,47 @@ export function MissionPlanningTab({
           onLaunch={onLaunchMission}
           plan={selectedMission?.plan ?? null}
         />
+        {approval && approval.missionId === selectedMission?.id ? (
+          <HumanInLoopPanel
+            approval={approval}
+            isRunning={isRunningPreflight}
+            onResolveApproval={onResolveApproval}
+            onSimulateApproval={() => undefined}
+          />
+        ) : null}
       </div>
     </section>
+  );
+}
+
+function MemoryModeControl({
+  disabled,
+  mode,
+  onChange,
+}: {
+  disabled: boolean;
+  mode: MemoryMode;
+  onChange: (mode: MemoryMode) => void;
+}) {
+  return (
+    <div className="flex items-center gap-1 rounded-2xl border border-neutral-200 bg-white p-1.5">
+      <span className="pl-1.5 text-[10px] font-bold uppercase tracking-[0.12em] text-neutral-500">Memory</span>
+      {(["AIRTABLE", "DEMO_FALLBACK"] as const).map((option) => (
+        <button
+          key={option}
+          type="button"
+          disabled={disabled}
+          onClick={() => onChange(option)}
+          className={cn(
+            "rounded-lg px-2 py-1.5 text-[10px] font-bold uppercase tracking-[0.06em] transition",
+            mode === option ? "bg-black text-white" : "bg-neutral-100 text-neutral-500 hover:text-black",
+            disabled && "cursor-not-allowed opacity-50",
+          )}
+        >
+          {option === "AIRTABLE" ? "Airtable" : "Demo"}
+        </button>
+      ))}
+    </div>
   );
 }
 

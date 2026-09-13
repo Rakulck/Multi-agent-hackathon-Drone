@@ -20,6 +20,7 @@ const lifecycleClasses: Record<MissionLifecycle, string> = {
   LAUNCHED: "bg-black text-white",
   IN_FLIGHT: "bg-black text-white",
   DELIVERED: "bg-emerald-100 text-emerald-700",
+  ABORTED: "bg-red-100 text-red-700",
 };
 
 export function MissionListPanel({ missions, onCreatePreset, onNewMission, onSelectMission, selectedMissionId }: MissionListPanelProps) {

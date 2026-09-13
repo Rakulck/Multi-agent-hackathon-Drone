@@ -9,7 +9,6 @@ interface HumanInLoopPanelProps {
   isRunning: boolean;
   onResolveApproval: (decision: ApprovalDecision) => void;
   onSimulateApproval: () => void;
-  slackNotified: boolean;
 }
 
 export function HumanInLoopPanel({
@@ -17,7 +16,6 @@ export function HumanInLoopPanel({
   isRunning,
   onResolveApproval,
   onSimulateApproval,
-  slackNotified,
 }: HumanInLoopPanelProps) {
   if (!approval) {
     return (
@@ -40,7 +38,7 @@ export function HumanInLoopPanel({
                 : "border-neutral-300 text-neutral-600 hover:border-black hover:text-black",
             )}
           >
-            Simulate uncertain event
+            Simulate low-confidence event
           </button>
         </div>
       </div>
@@ -59,17 +57,54 @@ export function HumanInLoopPanel({
         Recommended: {approval.recommendedAction}
       </p>
       <p className="mt-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-amber-700">
-        {slackNotified ? "Sent to Slack ✓" : "Notifying Slack..."}
+        {approvalStatusLabel(approval)}
       </p>
-      <div className="mt-2.5 grid grid-cols-3 gap-1.5">
-        <ApprovalButton onClick={() => onResolveApproval("approve-reroute")}>Approve Reroute</ApprovalButton>
-        <ApprovalButton onClick={() => onResolveApproval("return-home")}>Return Home</ApprovalButton>
-        <ApprovalButton onClick={() => onResolveApproval("cancel-mission")} isDanger>
-          Cancel Mission
-        </ApprovalButton>
-      </div>
+      {approval.statusMessage ? (
+        <p className="mt-1 text-[10px] leading-snug text-amber-800">{approval.statusMessage}</p>
+      ) : null}
+      {approval.transport === "DEMO_FALLBACK" && isActionable(approval) ? (
+        <>
+          <p className="mt-2 rounded-lg border border-dashed border-amber-500 bg-white px-2 py-1.5 text-center text-[9px] font-black uppercase tracking-[0.12em] text-amber-800">
+            DEMO_FALLBACK controls · not Slack actions
+          </p>
+          <div className="mt-1.5 grid grid-cols-3 gap-1.5">
+            <ApprovalButton onClick={() => onResolveApproval("approve")}>Approve Adjustment</ApprovalButton>
+            <ApprovalButton onClick={() => onResolveApproval("hold")}>Keep Hold</ApprovalButton>
+            <ApprovalButton onClick={() => onResolveApproval("reject")} isDanger>
+              Reject Mission
+            </ApprovalButton>
+          </div>
+        </>
+      ) : null}
     </div>
   );
+}
+
+function isActionable(approval: ApprovalRequest) {
+  return ["SLACK_UNAVAILABLE", "SLACK_API_FAILED"].includes(approval.status);
+}
+
+function approvalStatusLabel(approval: ApprovalRequest) {
+  switch (approval.status) {
+    case "SENDING":
+      return "Sending to Slack…";
+    case "PENDING":
+      return "Sent to Slack ✓ · waiting for operator";
+    case "APPROVED":
+      return `Approved${approval.operatorName ? ` by ${approval.operatorName}` : ""}`;
+    case "HELD":
+      return `Mission held${approval.operatorName ? ` by ${approval.operatorName}` : ""}`;
+    case "REJECTED":
+      return `Mission rejected${approval.operatorName ? ` by ${approval.operatorName}` : ""}`;
+    case "TIMED_OUT":
+      return "Slack approval timed out · still paused";
+    case "SLACK_UNAVAILABLE":
+      return "Slack unavailable · DEMO_FALLBACK enabled";
+    case "SLACK_API_FAILED":
+      return "Slack API failed · DEMO_FALLBACK enabled";
+    case "SLACK_UPDATE_FAILED":
+      return "Decision recorded · Slack message update failed";
+  }
 }
 
 function ApprovalButton({

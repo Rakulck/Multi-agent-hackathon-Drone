@@ -61,7 +61,6 @@ interface LiveMissionTabProps {
   plannedSpeedMph: number | null;
   selectedDrone: string;
   selectedRoute: RouteId | null;
-  slackNotified: boolean;
   weather: WeatherSnapshotData | null;
   weatherEvaluation: WeatherEvaluation | null;
 }
@@ -91,7 +90,6 @@ export function LiveMissionTab({
   plannedSpeedMph,
   selectedDrone,
   selectedRoute,
-  slackNotified,
   weather,
   weatherEvaluation,
 }: LiveMissionTabProps) {
@@ -110,6 +108,8 @@ export function LiveMissionTab({
       ? "Warning"
       : currentStatus === "DELIVERED"
         ? "Completed"
+        : currentStatus === "ABORTED"
+          ? "Failed"
         : "Evaluating";
   const reroutingBanner = currentStatus === "REROUTING" ? "Rerouting Route A → Route C" : null;
   const showMemory = isMemoryActive(memory) || Boolean(memory && hazardVisible);
@@ -209,7 +209,6 @@ export function LiveMissionTab({
           isRunning={isRunning}
           onResolveApproval={onResolveApproval}
           onSimulateApproval={onSimulateApproval}
-          slackNotified={slackNotified}
         />
       </aside>
     </section>
@@ -238,7 +237,7 @@ function getLiveDecisionParts(
       input: "Secondary object detected near active corridor.",
       evaluation: `${approval.reason}${commandSuffix}`,
       decision: `Human review requested: ${approval.category}. Recommended: ${approval.recommendedAction}`,
-      source: ["Simulated Sensor", "Slack"],
+      source: approval.transport === "SLACK" ? ["Simulated Sensor", "Slack"] : ["Simulated Sensor", "Agent"],
     };
   }
 
@@ -315,6 +314,15 @@ function getLiveDecisionParts(
       evaluation: `${memory?.id ?? "MEM-CRANE-001"} confirms Route A remains unsafe.`,
       decision: activeMission === "MISSION_2" ? `Changing altitude inside Route C corridor.${commandSuffix}` : `Locking in Route C.${commandSuffix}`,
       source: ["Agent", "Google Maps 3D"],
+    };
+  }
+
+  if (status === "ABORTED") {
+    return {
+      input: "Operator rejection received for the blocked drop-off decision.",
+      evaluation: `The drone remains stopped at its safe holding point.${commandSuffix}`,
+      decision: "Mission aborted. No package release or automatic continuation is permitted.",
+      source: ["Slack", "Operator", "Agent"],
     };
   }
 

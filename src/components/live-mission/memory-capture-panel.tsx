@@ -16,22 +16,32 @@ export function MemoryCapturePanel({ memory, hazardCenter }: MemoryCapturePanelP
         <span
           className={cn(
             "rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.1em]",
-            memory.airtableStatus === "saved" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700",
+            memory.airtableStatus === "saved"
+              ? "bg-emerald-100 text-emerald-700"
+              : memory.airtableStatus === "failed"
+                ? "bg-red-100 text-red-700"
+                : "bg-amber-100 text-amber-700",
           )}
         >
-          Airtable {memory.airtableStatus === "saved" ? "saved" : "saving..."}
+          {memory.airtableStatus === "fallback"
+            ? "DEMO_FALLBACK · localStorage"
+            : `Airtable ${memory.airtableStatus === "saved" ? "saved" : memory.airtableStatus === "failed" ? "failed" : "saving…"}`}
         </span>
       </div>
 
       <div className="mt-2 grid grid-cols-3 gap-x-2 gap-y-1.5 text-[10px] leading-tight text-neutral-700">
         <Field label="Hazard" value={memory.hazardType} />
-        <Field label="Coordinates" value={`${hazardCenter.lat.toFixed(4)}, ${hazardCenter.lng.toFixed(4)}`} />
+        <Field
+          label="Coordinates"
+          value={`${(memory.latitude ?? hazardCenter.lat).toFixed(4)}, ${(memory.longitude ?? hazardCenter.lng).toFixed(4)}`}
+        />
         <Field label="Altitude band" value={`${memory.altitudeBandM[0]}-${memory.altitudeBandM[1]}m`} />
         <Field label="Avoid radius" value={`${memory.avoidanceRadiusM}m`} />
         <Field label="Confidence" value={`${Math.round(memory.confidence * 100)}%`} />
-        <Field label="Source" value={memory.learnedBy} />
+        <Field label="Source" value={`${memory.learnedBy} · ${memory.sourceVendor}`} />
         <Field label="Expires" value={formatShortTimestamp(memory.expiresAt)} />
         <Field label="Record ID" value={memory.id} />
+        <Field label="Status" value={memory.status} />
       </div>
 
       <div

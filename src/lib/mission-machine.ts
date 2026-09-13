@@ -22,7 +22,11 @@ import type {
   IntegrationEvent,
   IntegrationStatus,
   Mission,
+  MissionRiskCondition,
+  MissionRiskReview,
   MissionMapScene,
+  MemoryApiResponse,
+  MemoryRouteMatch,
   MissionRun,
   MissionState,
   NewMissionInput,
@@ -97,25 +101,40 @@ export function selectDrone(drones: FleetDrone[], preferredModel: string): Fleet
   return eligible.drone;
 }
 
-export function createCraneMemory(): OperationalMemory {
+export function createCraneMemory(params: {
+  sourceDrone: string;
+  sourceVendor: string;
+  sourceMission: string;
+  location?: GeoPoint3D;
+  dataSource?: OperationalMemory["dataSource"];
+}): OperationalMemory {
+  const detectedAt = new Date();
+  const location = params.location ?? craneHazard.center;
+
   return {
-    id: "MEM-CRANE-001",
-    learnedBy: "Atlas HeavyLift",
+    id: `MEM-CRANE-${Math.round(location.lat * 100_000)}-${Math.round(Math.abs(location.lng) * 100_000)}-${detectedAt.getTime()}`,
+    learnedBy: params.sourceDrone,
     routeId: "A",
     hazardType: "temporary crane",
+    latitude: location.lat,
+    longitude: location.lng,
     severity: "High",
     confidence: 0.94,
-    createdAt: "2026-09-13T08:32:00.000Z",
-    expiresAt: "2026-09-14T08:32:00.000Z",
+    createdAt: detectedAt.toISOString(),
+    expiresAt: new Date(detectedAt.getTime() + 24 * 60 * 60 * 1_000).toISOString(),
     summary: `Blocked aerial corridor near ${craneHazard.label}; avoid Route A before takeoff.`,
     altitudeBandM: [90, 148],
     avoidanceRadiusM: 120,
-    airtableStatus: "saving",
+    sourceVendor: params.sourceVendor,
+    sourceMission: params.sourceMission,
+    status: "Active",
+    dataSource: params.dataSource ?? "AIRTABLE",
+    airtableStatus: params.dataSource === "DEMO_FALLBACK" ? "fallback" : "saving",
   };
 }
 
 export function markMemorySaved(memory: OperationalMemory): OperationalMemory {
-  return { ...memory, airtableStatus: "saved" };
+  return { ...memory, dataSource: "AIRTABLE", airtableStatus: "saved" };
 }
 
 export function markMemoryUsed(memory: OperationalMemory, usedBy: string): OperationalMemory {
@@ -126,7 +145,7 @@ export function markMemoryUsed(memory: OperationalMemory, usedBy: string): Opera
 }
 
 export function isMemoryActive(memory: OperationalMemory | null): memory is OperationalMemory {
-  return Boolean(memory && new Date(memory.expiresAt).getTime() > Date.now());
+  return Boolean(memory && memory.status === "Active" && new Date(memory.expiresAt).getTime() > Date.now());
 }
 
 export function interpolateRoute(routes: DemoRoute[], routeId: RouteId, progress: number): GeoPoint3D {
@@ -155,6 +174,29 @@ function lerp(start: number, end: number, progress: number) {
   return start + (end - start) * progress;
 }
 
+function minimumRouteDistanceM(latitude: number, longitude: number, waypoints: GeoPoint3D[]) {
+  const latScale = 111_320;
+  const lngScale = latScale * Math.cos(latitude * (Math.PI / 180));
+  let minimum = Number.POSITIVE_INFINITY;
+
+  for (let index = 0; index < waypoints.length - 1; index += 1) {
+    const start = waypoints[index];
+    const end = waypoints[index + 1];
+    const startX = (start.lng - longitude) * lngScale;
+    const startY = (start.lat - latitude) * latScale;
+    const endX = (end.lng - longitude) * lngScale;
+    const endY = (end.lat - latitude) * latScale;
+    const dx = endX - startX;
+    const dy = endY - startY;
+    const lengthSquared = dx * dx + dy * dy;
+    const progress =
+      lengthSquared === 0 ? 0 : Math.min(1, Math.max(0, -(startX * dx + startY * dy) / lengthSquared));
+    minimum = Math.min(minimum, Math.hypot(startX + progress * dx, startY + progress * dy));
+  }
+
+  return minimum;
+}
+
 /**
  * Derives the presentation-facing flight mode from the internal mission
  * state machine. `override` lets human-in-the-loop actions (e.g. Return
@@ -171,7 +213,7 @@ export function deriveFlightMode(params: {
     return override;
   }
 
-  if (status === "OBSTACLE DETECTED") {
+  if (status === "OBSTACLE DETECTED" || status === "ABORTED") {
     return "HOLD";
   }
 
@@ -238,9 +280,9 @@ export function waypointLabel(routes: DemoRoute[], routeId: RouteId | null, prog
 const MAX_INTEGRATION_EVENTS = 8;
 
 /**
- * Appends a new integration-flow placeholder event, marking any previously
- * "Processing" step as "Completed" first. Only typed placeholders are
- * created here — no external API is ever called from this helper.
+ * Appends a sanitized integration-flow event, marking any previously
+ * "Processing" step as "Completed" first. External calls remain in server
+ * routes; this helper only updates presentation state.
  */
 export function appendIntegrationEvent(
   events: IntegrationEvent[],
@@ -289,6 +331,7 @@ export function formatClockTime(date: Date): string {
 
 export const MISSION_RANGE_KM = 6.4;
 export const BATTERY_RESERVE_PERCENT = 30;
+export const ESTIMATED_MISSION_BATTERY_USE_PERCENT = 18;
 export const BASE_CRUISE_SPEED_MPH = 28;
 
 export function makeEmptyStepEvidence(): Record<PreflightStepId, StepEvidence> {
@@ -356,11 +399,17 @@ export function createMission(input: NewMissionInput, pattern: MissionRun = "MIS
     weatherFetchMessage: null,
     weather: null,
     weatherEvaluation: null,
+    memoryMode: "AIRTABLE",
+    memoryFetchState: "IDLE",
+    memoryFetchMessage: null,
+    memories: [],
+    memoryMatches: [],
     cruiseSpeedMph: null,
     etaDeltaMin: 0,
     routeEval: null,
     selectedRoute: null,
     airspaceEval: null,
+    riskReview: null,
     approvalRequired: false,
     plan: null,
     mapScene: buildMapSceneForInput(input),
@@ -404,8 +453,11 @@ export function buildRequestStepEvidence(input: NewMissionInput): StepEvidence {
 }
 
 /** STEP 2 — Evaluate Fleet. */
-export function fleetSnapshotForPreflight(fleet: FleetDrone[], memory: OperationalMemory | null): FleetDrone[] {
-  if (isMemoryActive(memory)) {
+export function fleetSnapshotForPreflight(
+  fleet: FleetDrone[],
+  pattern: MissionRun,
+): FleetDrone[] {
+  if (pattern === "MISSION_2") {
     return fleet.map((drone) =>
       drone.model === "Atlas HeavyLift" && drone.status === "Available" ? { ...drone, status: "Charging" as const } : drone,
     );
@@ -440,11 +492,13 @@ export function evaluateFleetForMission(fleet: FleetDrone[], weightKg: number, d
       };
     }
 
-    if (drone.batteryPercent < BATTERY_RESERVE_PERCENT) {
+    const projectedReserve =
+      drone.batteryPercent - ESTIMATED_MISSION_BATTERY_USE_PERCENT;
+    if (projectedReserve < BATTERY_RESERVE_PERCENT) {
       return {
         drone,
         eligible: false,
-        reason: `${drone.model} rejected: battery ${drone.batteryPercent}% below ${BATTERY_RESERVE_PERCENT}% reserve.`,
+        reason: `${drone.model} rejected: projected landing reserve ${projectedReserve}% is below the ${BATTERY_RESERVE_PERCENT}% minimum.`,
       };
     }
 
@@ -455,7 +509,7 @@ export function evaluateFleetForMission(fleet: FleetDrone[], weightKg: number, d
     return {
       drone,
       eligible: true,
-      reason: `${drone.model} approved: availability, payload, range, battery reserve, and cargo capability confirmed.`,
+      reason: `${drone.model} approved: projected landing reserve ${projectedReserve}% satisfies the ${BATTERY_RESERVE_PERCENT}% minimum; payload, range, availability and capability confirmed.`,
     };
   });
 }
@@ -475,6 +529,7 @@ export function buildFleetStepEvidence(rows: FleetEvalRow[], weightKg: number): 
       `Package weight: ${weightKg} kg`,
       `Mission distance: ${MISSION_RANGE_KM} km`,
       `Battery reserve requirement: ${BATTERY_RESERVE_PERCENT}%`,
+      `Estimated mission battery use: ${ESTIMATED_MISSION_BATTERY_USE_PERCENT}%`,
       "Drone availability and capabilities loaded from Airtable fleet table.",
     ],
     evaluation: rows.map((row) => `${row.drone.model}: ${row.reason}`),
@@ -654,47 +709,81 @@ export function buildAirspaceStepEvidence(evalResult: AirspaceEval): StepEvidenc
 }
 
 /** STEP 5 — Retrieve Shared Memory. */
-export function buildMemoryStepEvidence(memory: OperationalMemory | null): StepEvidence {
-  const active = isMemoryActive(memory);
+export function evaluateMemoriesAgainstRoutes(
+  memories: OperationalMemory[],
+  routes: DemoRoute[],
+): MemoryRouteMatch[] {
+  return memories.flatMap((memory) =>
+    routes.map((route) => {
+      const distanceM = minimumRouteDistanceM(memory.latitude, memory.longitude, route.waypoints);
+      const routeAltitudes = route.waypoints.map((point) => point.altitude);
+      const routeMin = Math.min(...routeAltitudes);
+      const routeMax = Math.max(...routeAltitudes);
+      const altitudeOverlap = routeMax >= memory.altitudeBandM[0] && routeMin <= memory.altitudeBandM[1];
+      const matched = distanceM <= memory.avoidanceRadiusM && altitudeOverlap;
+      return {
+        memoryId: memory.id,
+        routeId: route.id,
+        distanceM: Math.round(distanceM),
+        altitudeOverlap,
+        matched,
+        reason: matched
+          ? `Route ${route.id} enters the ${memory.avoidanceRadiusM} m avoidance radius at an overlapping altitude.`
+          : `Route ${route.id}: nearest point ${Math.round(distanceM)} m; altitude overlap ${altitudeOverlap ? "yes" : "no"}.`,
+      };
+    }),
+  );
+}
 
-  const input = [
-    "Candidate route corridors: A, B, C",
-    "Destination coordinates resolved.",
-    "Altitude bands loaded for each corridor.",
-    `Current time: ${formatClockTime(new Date())}`,
-    active && memory ? `Active Airtable memory record: ${memory.id}` : "Active Airtable memory records: none",
-  ];
-
-  const evaluation = active && memory
-    ? [
-        `Geographic overlap: ${memory.routeId === "A" ? "Route A corridor intersects hazard polygon." : "No overlap."}`,
-        `Altitude overlap: ${memory.altitudeBandM[0]}-${memory.altitudeBandM[1]} m within cruise corridor.`,
-        `Severity: ${memory.severity}.`,
-        `Confidence: ${Math.round(memory.confidence * 100)}%.`,
-        `Expiration: ${formatTimestampShort(memory.expiresAt)} (still active).`,
-        "Verification status: verified by originating drone.",
-      ]
-    : [
-        "Geographic overlap: none detected against active records.",
-        "Altitude overlap: none detected against active records.",
-        "Severity: n/a.",
-        "Confidence: n/a.",
-        "Expiration: n/a.",
-        "Verification status: no records to verify.",
-      ];
+export function buildMemoryStepEvidence(params: {
+  response: MemoryApiResponse;
+  matches: MemoryRouteMatch[];
+  retrievedBy: string | null;
+}): StepEvidence {
+  const { response, matches, retrievedBy } = params;
+  const failed = response.status !== "SUCCESS";
+  const blockingMatches = matches.filter((match) => match.matched);
 
   return {
     id: "MEMORY",
     title: stepTitles.MEMORY,
-    input,
-    evaluation,
-    decision:
-      active && memory
-        ? `${memory.id} overlaps Route A and remains active. Route A must be rejected before takeoff.`
-        : "No active memory affects this destination. Continue with all three candidate routes.",
-    source: ["Airtable", "Shared Intelligence Layer"],
-    status: active ? "Warning" : "Completed",
-    summary: active ? `${memory?.id ?? "MEM-CRANE-001"} retrieved. Route A rejected.` : "No relevant active memories.",
+    input: [
+      `Memory load state: ${response.status} — ${response.message}`,
+      `Data source: ${response.source}`,
+      "Candidate route coordinates and altitude bands: A, B, C",
+      `Current time: ${formatClockTime(new Date())}`,
+      `Active, non-expired records received: ${response.memories.length}`,
+    ],
+    evaluation: failed
+      ? [
+          "Airtable memory could not be verified.",
+          "No local or stale memory was substituted in normal mode.",
+          "Route safety cannot be completed without human review.",
+        ]
+      : response.memories.length === 0
+        ? ["No active, non-expired operational memories overlap this mission."]
+        : [
+            ...response.memories.map(
+              (memory) =>
+                `${retrievedBy ?? "Selected drone"} retrieved ${memory.id}, created by ${memory.learnedBy} (${memory.sourceVendor}); expires ${formatTimestampShort(memory.expiresAt)}.`,
+            ),
+            ...matches.map((match) => `${match.memoryId}: ${match.reason}`),
+          ],
+    decision: failed
+      ? "Mission paused. Human approval required because Airtable memory state is unavailable."
+      : blockingMatches.length > 0
+        ? `${blockingMatches.map((match) => `Route ${match.routeId}`).join(", ")} rejected using active shared memory.`
+        : "No active memory intersects a route in both location and altitude.",
+    source:
+      response.source === "AIRTABLE"
+        ? ["Airtable LIVE", "Deterministic Coordinate + Altitude Rules"]
+        : ["localStorage DEMO_FALLBACK (not Airtable)", "Deterministic Coordinate + Altitude Rules"],
+    status: failed ? "Approval" : blockingMatches.length > 0 ? "Warning" : "Completed",
+    summary: failed
+      ? `${response.status} — mission paused for human approval.`
+      : blockingMatches.length > 0
+        ? `${retrievedBy ?? "Drone"} retrieved ${response.memories.length} memor${response.memories.length === 1 ? "y" : "ies"}; Route ${blockingMatches[0].routeId} rejected.`
+        : "No route-blocking memories found.",
   };
 }
 
@@ -708,6 +797,7 @@ const routeBaseStats: Record<RouteId, { distanceKm: number; etaMin: number }> = 
 export function evaluateRoutesForMission(
   memoryBlocksRouteA: boolean,
   airspaceEval: AirspaceEval | null = null,
+  blockingMemoryId: string | null = null,
 ): { rows: RouteEvalRow[]; selectedRoute: RouteId } {
   const airspaceBlocksA = Boolean(airspaceEval && !airspaceEval.routeResults.find((row) => row.id === "A")?.eligible);
   const airspacePreferred = airspaceEval?.preferredRoute ?? null;
@@ -752,11 +842,11 @@ export function evaluateRoutesForMission(
         name: "Route A",
         ...routeBaseStats.A,
         weatherExposure: "Within limits",
-        memoryConflict: "MEM-CRANE-001 active",
+        memoryConflict: `${blockingMemoryId ?? "Active memory"} active`,
         status: "blocked",
         reason: airspaceBlocksA
-          ? "Blocked by MEM-CRANE-001 and airspace ceiling / restricted geofence."
-          : "Blocked by MEM-CRANE-001.",
+          ? `Blocked by ${blockingMemoryId ?? "active memory"} and airspace ceiling / restricted geofence.`
+          : `Blocked by ${blockingMemoryId ?? "active memory"}.`,
       },
       {
         id: "B",
@@ -825,9 +915,17 @@ export function buildRoutesStepEvidence(params: {
   selectedRoute: RouteId;
   droneModel: string | null;
   memoryBlocksRouteA: boolean;
+  blockingMemoryIds?: string[];
   airspaceBlocksRouteA?: boolean;
 }): StepEvidence {
-  const { rows, selectedRoute, droneModel, memoryBlocksRouteA, airspaceBlocksRouteA = false } = params;
+  const {
+    rows,
+    selectedRoute,
+    droneModel,
+    memoryBlocksRouteA,
+    blockingMemoryIds = [],
+    airspaceBlocksRouteA = false,
+  } = params;
 
   return {
     id: "ROUTES",
@@ -839,7 +937,9 @@ export function buildRoutesStepEvidence(params: {
       airspaceBlocksRouteA
         ? "Airspace compliance: Route A exceeds FAA-constrained candidate corridor."
         : "Airspace compliance: all corridors within published constraints.",
-      memoryBlocksRouteA ? "Active obstacle memory: MEM-CRANE-001." : "No active obstacle memories.",
+      memoryBlocksRouteA
+        ? `Active route-matched memories: ${blockingMemoryIds.join(", ")}.`
+        : "No active obstacle memories.",
       `Battery reserve requirement: ${BATTERY_RESERVE_PERCENT}%.`,
     ],
     evaluation: rows.map(
@@ -857,43 +957,306 @@ export function buildRoutesStepEvidence(params: {
   };
 }
 
-/** STEP 7 — Check Human Approval. */
-export function isApprovalRequired(rows: RouteEvalRow[] | null): boolean {
-  if (!rows) {
-    return false;
+/** STEP 7 — deterministic SAFE / CAUTION / UNSAFE mission review. */
+export function evaluateMissionRiskReview(mission: Mission): MissionRiskReview {
+  const conditions: MissionRiskCondition[] = [];
+  const selectedFleetRow =
+    mission.fleetEligibility?.find(
+      (row) => row.drone.model === mission.confirmedDrone,
+    ) ?? null;
+  const selectedDrone = selectedFleetRow?.drone ?? null;
+  const selectedRoute =
+    mission.routeEval?.find((row) => row.id === mission.selectedRoute) ?? null;
+  const selectedAirspace =
+    mission.airspaceEval?.routeResults.find(
+      (row) => row.id === mission.selectedRoute,
+    ) ?? null;
+
+  if (!selectedDrone) {
+    conditions.push(
+      hardRisk(
+        "no-eligible-drone",
+        "No drone satisfies all payload, range, battery and weather constraints.",
+        "No confirmed drone",
+        "An eligible drone is required",
+        "Block launch and assign a certified drone.",
+      ),
+    );
+  } else {
+    if (mission.input.weightKg > selectedDrone.payloadKg) {
+      conditions.push(
+        hardRisk(
+          "payload-capacity",
+          "Payload exceeds the selected drone's certified capacity.",
+          `${mission.input.weightKg} kg`,
+          `≤ ${selectedDrone.payloadKg} kg`,
+          "Block launch and select a higher-capacity drone.",
+        ),
+      );
+    }
+    if (selectedDrone.rangeKm < MISSION_RANGE_KM) {
+      conditions.push(
+        hardRisk(
+          "range-capacity",
+          "Mission distance exceeds the selected drone's certified range.",
+          `${MISSION_RANGE_KM} km required`,
+          `≤ ${selectedDrone.rangeKm} km`,
+          "Block launch and select a longer-range drone.",
+        ),
+      );
+    }
+    const projectedReserve =
+      selectedDrone.batteryPercent - ESTIMATED_MISSION_BATTERY_USE_PERCENT;
+    if (projectedReserve < BATTERY_RESERVE_PERCENT) {
+      conditions.push(
+        hardRisk(
+          "battery-below-minimum",
+          "Projected landing battery reserve is below the hard minimum.",
+          `${projectedReserve}% projected reserve`,
+          `≥ ${BATTERY_RESERVE_PERCENT}%`,
+          "Block launch and recharge or replace the drone.",
+        ),
+      );
+    } else if (
+      projectedReserve <= BATTERY_RESERVE_PERCENT + 10
+    ) {
+      conditions.push({
+        id: "battery-near-minimum",
+        kind: "BATTERY_RESERVE",
+        level: "CAUTION",
+        riskDetected: "Projected landing battery reserve is close to the minimum required level.",
+        currentValue: `${projectedReserve}% projected (${selectedDrone.batteryPercent}% at launch)`,
+        allowedLimit: `Minimum ${BATTERY_RESERVE_PERCENT}%`,
+        agentRecommendation: "Use a reduced-speed plan and monitor reserve continuously.",
+        proposedAdjustment: "Keep the alternate landing site available and hold if reserve reaches 30%.",
+      });
+    }
   }
-  return rows.every((row) => row.status === "blocked");
+
+  if (mission.weatherEvaluation?.severity === "UNSAFE") {
+    const peak = Math.max(
+      mission.weather?.windMph ?? 0,
+      mission.weather?.gustMph ?? 0,
+    );
+    const maximumLimit = Math.max(
+      0,
+      ...(mission.fleetEligibility ?? [])
+        .filter((row) => row.eligible)
+        .map((row) => row.drone.windLimitMph),
+    );
+    conditions.push(
+      hardRisk(
+        "wind-over-limit",
+        "Wind or gust exceeds every eligible drone's certified limit.",
+        `${peak} mph peak`,
+        `≤ ${maximumLimit} mph`,
+        "Block launch until wind returns within certified limits.",
+      ),
+    );
+  } else if (selectedDrone && mission.weather) {
+    const selectedWeatherEvaluation =
+      mission.weatherEvaluation?.droneEvaluations.find(
+        (entry) => entry.drone.model === selectedDrone.model,
+      );
+    if (
+      mission.weatherEvaluation?.severity !== "MODERATE" ||
+      !selectedWeatherEvaluation ||
+      selectedWeatherEvaluation.utilizationPercent < 75
+    ) {
+      // Moderate conditions with at least 25% certified wind margin remain SAFE.
+    } else {
+    const peak = Math.max(mission.weather.windMph, mission.weather.gustMph);
+    conditions.push({
+      id: "moderate-wind-margin",
+      kind: "WEATHER_MARGIN",
+      level: "CAUTION",
+      riskDetected: "Wind or gust is close to the selected drone's certified limit.",
+      currentValue: `${peak} mph peak (${Math.round((peak / selectedDrone.windLimitMph) * 100)}% utilization)`,
+      allowedLimit: `≤ ${selectedDrone.windLimitMph} mph`,
+      agentRecommendation: "Approve only with the deterministic reduced-speed weather plan.",
+      proposedAdjustment: `Reduce cruise speed to ${mission.cruiseSpeedMph} mph; ETA +${mission.etaDeltaMin} min.`,
+    });
+    }
+  }
+
+  const lowConfidenceMemories = mission.memories.filter(
+    (memory) =>
+      memory.confidence < 0.75 &&
+      mission.memoryMatches.some(
+        (match) => match.memoryId === memory.id && match.matched,
+      ),
+  );
+  if (lowConfidenceMemories.length > 0) {
+    conditions.push({
+      id: "low-confidence-obstacle",
+      kind: "OBSTACLE_CONFIDENCE",
+      level: "CAUTION",
+      riskDetected: "A route-adjacent obstacle was detected with low confidence.",
+      currentValue: `${Math.round(Math.min(...lowConfidenceMemories.map((memory) => memory.confidence)) * 100)}% confidence`,
+      allowedLimit: "≥ 75% for autonomous rerouting",
+      agentRecommendation: "Pause for operator review instead of treating the obstacle as confirmed.",
+      proposedAdjustment: "Avoid the uncertain corridor and re-scan before flight resumes.",
+    });
+  }
+
+  if (selectedAirspace && !selectedAirspace.eligible) {
+    conditions.push(
+      hardRisk(
+        "restricted-airspace-violation",
+        "Selected route violates an airspace ceiling or restricted geofence.",
+        `Route ${selectedAirspace.id}: ${selectedAirspace.plannedAglFt} ft AGL`,
+        `Eligible corridor at or below ${mission.airspaceEval?.maxAltitudeAglFt ?? "published"} ft AGL`,
+        "Block launch and select a compliant corridor.",
+      ),
+    );
+  } else if (mission.selectedRoute === "A") {
+    conditions.push({
+      id: "restricted-airspace-proximity",
+      kind: "AIRSPACE_PROXIMITY",
+      level: "CAUTION",
+      riskDetected: "Selected route passes close to the restricted dockside geofence.",
+      currentValue: "Route A requires live monitoring near the active geofence",
+      allowedLimit: "No entry into GF-RESTRICTED-DOCK",
+      agentRecommendation: "Prefer the compliant Route B corridor.",
+      proposedAdjustment: "Switch Route A → Route B; estimated ETA +2 min.",
+    });
+  }
+
+  if (
+    selectedAirspace &&
+    mission.airspaceEval &&
+    selectedAirspace.plannedAglFt >= mission.airspaceEval.maxAltitudeAglFt * 0.95
+  ) {
+    conditions.push({
+      id: "altitude-margin",
+      kind: "ROUTE_ADJUSTMENT",
+      level: "CAUTION",
+      riskDetected: "Planned altitude has a narrow margin below the published ceiling.",
+      currentValue: `${selectedAirspace.plannedAglFt} ft AGL`,
+      allowedLimit: `≤ ${mission.airspaceEval.maxAltitudeAglFt} ft AGL`,
+      agentRecommendation: "Use a lower altitude inside the eligible corridor.",
+      proposedAdjustment: `Reduce planned altitude by 10 ft; retain Route ${selectedAirspace.id}.`,
+    });
+  }
+
+  if (
+    selectedRoute &&
+    (selectedRoute.etaMin > routeBaseStats.A.etaMin || mission.etaDeltaMin > 0)
+  ) {
+    const totalImpact =
+      selectedRoute.etaMin - routeBaseStats.A.etaMin + mission.etaDeltaMin;
+    conditions.push({
+      id: "route-eta-impact",
+      kind: "ROUTE_ADJUSTMENT",
+      level: "CAUTION",
+      riskDetected: "The safer route or operating adjustment increases ETA.",
+      currentValue: `Route ${selectedRoute.id}: ~${selectedRoute.etaMin + mission.etaDeltaMin} min`,
+      allowedLimit: `Baseline Route A: ~${routeBaseStats.A.etaMin} min`,
+      agentRecommendation: "Accept the delay only if the safety-adjusted route remains operationally appropriate.",
+      proposedAdjustment: `Use Route ${selectedRoute.id}; ETA +${Math.max(1, totalImpact)} min.`,
+    });
+  }
+
+  const allRoutesBlocked = Boolean(
+    mission.routeEval?.length &&
+      mission.routeEval.every((route) => route.status === "blocked"),
+  );
+  if (allRoutesBlocked) {
+    conditions.push(
+      hardRisk(
+        "all-routes-blocked",
+        "Every route is blocked by deterministic safety constraints.",
+        "0 eligible routes",
+        "At least 1 compliant route required",
+        "Block the mission until a compliant route exists.",
+      ),
+    );
+  }
+
+  const level = conditions.some((condition) => condition.level === "UNSAFE")
+    ? "UNSAFE"
+    : conditions.length > 0
+      ? "CAUTION"
+      : "SAFE";
+  return {
+    level,
+    conditions,
+    summary:
+      level === "SAFE"
+        ? "All deterministic checks have sufficient safety margin."
+        : level === "CAUTION"
+          ? `${conditions.length} related caution condition${conditions.length === 1 ? "" : "s"} grouped for one operator review.`
+          : `${conditions.filter((condition) => condition.level === "UNSAFE").length} hard safety failure${conditions.filter((condition) => condition.level === "UNSAFE").length === 1 ? "" : "s"} block the mission automatically.`,
+  };
 }
 
-export function buildApprovalStepEvidence(required: boolean, weather: WeatherEvaluation | null): StepEvidence {
-  const weatherCheck =
-    weather?.severity === "MODERATE"
-      ? `Weather moderate: deterministic ${weather.cruiseSpeedMph} mph speed and +${weather.etaDeltaMin} min ETA controls already applied.`
-      : "Weather safely below the confirmed drone's limit.";
-
+export function buildApprovalStepEvidence(
+  review: MissionRiskReview,
+  operatorDecision?: "APPROVED" | "HELD" | "REJECTED" | "TIMED_OUT",
+): StepEvidence {
+  const approved = review.level === "CAUTION" && operatorDecision === "APPROVED";
+  const status: StepEvidence["status"] =
+    review.level === "UNSAFE" || operatorDecision === "REJECTED"
+      ? "Failed"
+      : review.level === "CAUTION" && !approved
+        ? "Approval"
+        : review.level === "CAUTION"
+          ? "Warning"
+          : "Completed";
   return {
     id: "APPROVAL",
     title: stepTitles.APPROVAL,
     input: [
-      "Route evaluation result.",
-      "Weather evaluation result.",
-      "Battery reserve confirmation.",
-      "Drop-off zone availability.",
+      "Grouped deterministic mission risk review.",
+      "Payload, range, battery, weather, memory, route, airspace and delivery constraints.",
     ],
-    evaluation: [
-      "All routes blocked? No.",
-      "Obstacle confidence low? No.",
-      weatherCheck,
-      "Battery reserve uncertain? No.",
-      "Required safety data unavailable? No.",
-      "Primary and alternate drop-off zones blocked? No.",
-    ],
-    decision: required
-      ? "Human approval required before launch. Operator notified via Slack."
-      : "No human approval required. All deterministic safety checks passed.",
-    source: required ? ["Agent", "Slack"] : ["Agent", "Slack marked as Standby"],
-    status: required ? "Approval" : "Completed",
-    summary: required ? "Waiting for operator decision." : "Autonomous launch approved.",
+    evaluation:
+      review.conditions.length > 0
+        ? review.conditions.map(
+            (condition) =>
+              `${condition.level} · ${condition.riskDetected} Current: ${condition.currentValue}. Limit: ${condition.allowedLimit}.`,
+          )
+        : ["SAFE — no caution or hard-limit condition detected."],
+    decision:
+      review.level === "UNSAFE"
+        ? "UNSAFE: mission automatically blocked. Human approval cannot override hard safety limits."
+        : review.level === "CAUTION"
+          ? approved
+            ? "CAUTION approved by operator. Apply every proposed adjustment before launch."
+            : operatorDecision === "REJECTED"
+              ? "Operator rejected the caution plan. Mission blocked."
+              : "CAUTION: mission paused and one grouped Slack approval requested."
+          : "SAFE: continue automatically without sending Slack.",
+    source:
+      review.level === "CAUTION"
+        ? ["Deterministic Safety Rules", "Slack"]
+        : ["Deterministic Safety Rules", "Slack not contacted"],
+    status,
+    summary:
+      operatorDecision === "TIMED_OUT"
+        ? "Approval timed out; mission remains paused."
+        : operatorDecision === "HELD"
+          ? "Operator kept the mission on hold."
+          : review.summary,
+  };
+}
+
+function hardRisk(
+  id: string,
+  riskDetected: string,
+  currentValue: string,
+  allowedLimit: string,
+  proposedAdjustment: string,
+): MissionRiskCondition {
+  return {
+    id,
+    kind: "HARD_SAFETY_LIMIT",
+    level: "UNSAFE",
+    riskDetected,
+    currentValue,
+    allowedLimit,
+    agentRecommendation: "Do not request an override.",
+    proposedAdjustment,
   };
 }
 
