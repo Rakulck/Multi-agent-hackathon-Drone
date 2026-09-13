@@ -130,11 +130,18 @@ export function LiveMissionTab({
     <section className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(0,68fr)_minmax(390px,32fr)]">
       <MapShell
         airspaceVisible={airspaceVisible}
+        approvalStatus={approval?.status ?? null}
+        batteryPercent={batteryPercent}
         routes={routeLegend}
         routeStatuses={routeStatuses}
         selectedRoute={selectedRoute}
         dronePosition={dronePosition}
         hazardVisible={hazardVisible}
+        memory={memory}
+        missionRun={activeMission}
+        missionStatus={currentStatus}
+        plannedSpeedMph={speedKmh / 1.60934}
+        routeProgress={routeProgress}
         statusLabel={flightMode}
         dropOffZone={mapScene.dropOffZone}
         reroutingBanner={reroutingBanner}

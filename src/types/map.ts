@@ -1,4 +1,11 @@
-import type { RouteId, RouteStatus } from "@/types/domain";
+import type {
+  MissionRun,
+  MissionState,
+  OperationalMemory,
+  RouteId,
+  RouteStatus,
+  SlackApprovalStatus,
+} from "@/types/domain";
 
 /** A single 3D point used throughout the map engine. Altitude is always meters here. */
 export interface Waypoint3D {
@@ -81,6 +88,28 @@ export interface DroneSimulationTelemetry {
 }
 
 export type MapRouteStatus = RouteStatus | "inactive";
+
+export type MapAnimationCommand =
+  | "TAKEOFF"
+  | "CRUISE"
+  | "HOLD"
+  | "RESUME"
+  | "REROUTE"
+  | "CHANGE_ALTITUDE"
+  | "APPROACH"
+  | "LAND"
+  | "RETURN_HOME";
+
+/** Optional live context layered onto the map without changing its required public props. */
+export interface MapMissionAnimationContext {
+  approvalStatus?: SlackApprovalStatus | null;
+  batteryPercent?: number | null;
+  memory?: OperationalMemory | null;
+  missionRun?: MissionRun | null;
+  missionStatus?: MissionState;
+  plannedSpeedMph?: number | null;
+  routeProgress?: number;
+}
 
 export interface DroneMapHandle {
   showOverview: () => void;

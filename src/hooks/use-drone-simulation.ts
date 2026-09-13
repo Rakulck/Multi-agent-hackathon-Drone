@@ -68,15 +68,24 @@ export function useDroneSimulation({ routes, throttleMs = 80 }: UseDroneSimulati
     });
 
     engineRef.current = engine;
+    let resumeAfterVisibility = false;
+    const handleVisibilityChange = () => {
+      if (document.hidden && engine.isRunning() && !engine.isPaused()) {
+        resumeAfterVisibility = true;
+        engine.pauseFlight();
+      } else if (!document.hidden && resumeAfterVisibility) {
+        resumeAfterVisibility = false;
+        engine.resumeFlight();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       engine.cancel();
       engineRef.current = null;
     };
-    // `routes` is a stable module-level constant in every current call site;
-    // the engine is intentionally created once per mount.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [routes, throttleMs]);
 
   const startRoute = useCallback((routeId: RouteId) => {
     engineRef.current?.startRoute(routeId);

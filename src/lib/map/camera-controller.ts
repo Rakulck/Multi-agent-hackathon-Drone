@@ -29,6 +29,7 @@ export function createCameraController(
   getMap: () => Map3DLike | null,
   presets: Record<CameraPresetId, CameraPresetDefinition>,
   followIntervalMs = 450,
+  reducedMotion = false,
 ): CameraController {
   let followEnabled = false;
   let lastFollowUpdateAt = 0;
@@ -47,7 +48,7 @@ export function createCameraController(
       tilt,
     };
 
-    if (typeof map.flyCameraTo === "function") {
+    if (typeof map.flyCameraTo === "function" && !reducedMotion) {
       map.flyCameraTo({ durationMillis, endCamera });
     } else {
       Object.assign(map, endCamera);

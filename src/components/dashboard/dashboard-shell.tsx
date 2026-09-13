@@ -47,6 +47,11 @@ import {
 import { defaultMapScene } from "@/lib/map/route-warp";
 import { validateAlternativeDropOff } from "@/lib/customer-dropoff-safety";
 import { buildCustomerMessage } from "@/lib/customer-message-templates";
+import {
+  buildReroutePath,
+  prefersReducedMotion,
+  withVerticalFlightEndpoints,
+} from "@/lib/map/mission-animation";
 import { cn } from "@/lib/utils";
 import {
   preflightStepOrder,
@@ -1188,11 +1193,29 @@ export function DashboardShell() {
     const droneModel = mission.confirmedDrone ?? "Atlas HeavyLift";
     const routes = mission.mapScene.routes;
     const flightRoute: RouteId = mission.selectedRoute ?? "A";
+    const launchAltitudeM =
+      routes.find((route) => route.id === flightRoute)?.waypoints[1]?.altitude ??
+      mission.mapScene.origin.altitude + 24;
+    const flightRoutes = routes.map((route) =>
+      route.id === flightRoute || route.id === "C"
+        ? {
+            ...route,
+            waypoints: withVerticalFlightEndpoints(route.waypoints, launchAltitudeM),
+          }
+        : route,
+    );
 
-    await wait(500);
+    await wait(300);
+    if (!isRunActive(runToken)) return;
+    await animateAltitudeAtCurrentPosition(
+      launchAltitudeM,
+      850,
+      setDronePosition,
+      () => isRunActive(runToken),
+    );
     if (!isRunActive(runToken)) return;
     await animateRoute(
-      routes,
+      flightRoutes,
       flightRoute,
       0,
       0.5,
@@ -1203,9 +1226,8 @@ export function DashboardShell() {
       () => isRunActive(runToken),
     );
     if (!isRunActive(runToken)) return;
-
     const sourceDrone = fleet.find((drone) => drone.model === droneModel);
-    const currentPosition = interpolateRoute(routes, flightRoute, 0.5);
+    const currentPosition = interpolateRoute(flightRoutes, flightRoute, 0.5);
     setCurrentStatus("OBSTACLE DETECTED");
     setFlightModeOverride("HOLD");
     setEtaLabel("Holding");
@@ -1276,7 +1298,7 @@ export function DashboardShell() {
       });
       if (!isRunActive(runToken)) return;
       await animateRoute(
-        routes,
+        flightRoutes,
         flightRoute,
         0.5,
         1,
@@ -1284,6 +1306,14 @@ export function DashboardShell() {
         setDronePosition,
         setRouteProgress,
         (progress) => updateLiveTelemetry(mission, progress),
+        () => isRunActive(runToken),
+      );
+      if (!isRunActive(runToken)) return;
+      pushCommand("Verify drop-off zone");
+      await animateAltitudeAtCurrentPosition(
+        mission.mapScene.dropOffZone.point.altitude,
+        900,
+        setDronePosition,
         () => isRunActive(runToken),
       );
       if (!isRunActive(runToken)) return;
@@ -1400,6 +1430,7 @@ export function DashboardShell() {
 
     await wait(500);
     if (!isRunActive(runToken)) return;
+    let rerouteStart = currentPosition;
     if (continuingCurrentRoute) {
       pushCommand("Climb slightly to 155 m");
       setFlightModeOverride("REROUTING");
@@ -1415,13 +1446,29 @@ export function DashboardShell() {
         () => isRunActive(runToken),
       );
       if (!isRunActive(runToken)) return;
+      rerouteStart = { ...currentPosition, altitude: 155 };
+    } else {
+      const approvedAltitudeM = Math.max(
+        currentPosition.altitude,
+        (savedMemory?.altitudeBandM[1] ?? currentPosition.altitude) + 12,
+      );
+      pushCommand(`Change altitude to ${Math.round(approvedAltitudeM)} m`);
+      setFlightModeOverride("REROUTING");
+      await animateAltitudeAtCurrentPosition(
+        approvedAltitudeM,
+        900,
+        setDronePosition,
+        () => isRunActive(runToken),
+      );
+      if (!isRunActive(runToken)) return;
+      rerouteStart = { ...currentPosition, altitude: approvedAltitudeM };
     }
     pushCommand("Resume flight");
     setFlightModeOverride(null);
     setCurrentStatus("IN FLIGHT");
     setLiveBattery((current) => (current === null ? null : current - 4));
     const resumedRoutes = continuingCurrentRoute
-      ? routes.map((route) =>
+      ? flightRoutes.map((route) =>
           route.id === resumedRoute
             ? {
                 ...route,
@@ -1433,7 +1480,14 @@ export function DashboardShell() {
               }
             : route,
         )
-      : routes;
+      : flightRoutes.map((route) =>
+          route.id === "C"
+            ? {
+                ...route,
+                waypoints: buildReroutePath(rerouteStart, route.waypoints),
+              }
+            : route,
+        );
     if (continuingCurrentRoute) {
       setActiveMapScene((current) => ({
         ...current,
@@ -1447,7 +1501,7 @@ export function DashboardShell() {
     await animateRoute(
       resumedRoutes,
       resumedRoute,
-      0.5,
+      continuingCurrentRoute ? 0.5 : 0,
       1,
       adjustedAnimationDuration(mission, 2600),
       setDronePosition,
@@ -1458,7 +1512,12 @@ export function DashboardShell() {
 
     if (!isRunActive(runToken)) return;
     pushCommand("Verify drop-off zone");
-    await wait(450);
+    await animateAltitudeAtCurrentPosition(
+      mission.mapScene.dropOffZone.point.altitude,
+      900,
+      setDronePosition,
+      () => isRunActive(runToken),
+    );
     if (!isRunActive(runToken)) return;
     setCurrentStatus("DELIVERED");
     setEtaLabel("Delivered");
@@ -1470,7 +1529,18 @@ export function DashboardShell() {
   async function runLiveMission2(mission: Mission, runToken: number) {
     const droneModel = mission.confirmedDrone ?? "CargoSwift S2";
     const routes = mission.mapScene.routes;
-    const flightRoute = mission.selectedRoute ?? "B";
+    const flightRoute = mission.selectedRoute ?? "C";
+    const launchAltitudeM =
+      routes.find((route) => route.id === flightRoute)?.waypoints[1]?.altitude ??
+      mission.mapScene.origin.altitude + 20;
+    const flightRoutes = routes.map((route) =>
+      route.id === flightRoute
+        ? {
+            ...route,
+            waypoints: withVerticalFlightEndpoints(route.waypoints, launchAltitudeM),
+          }
+        : route,
+    );
 
     const retrievedMemory = mission.memories.find((item) => item.usedBy === droneModel) ?? mission.memories[0] ?? null;
     pushIntegrationEvent(
@@ -1495,8 +1565,15 @@ export function DashboardShell() {
     // Keep the Mission 2 decision visible long enough to narrate during the demo.
     await wait(5_000);
     if (!isRunActive(runToken)) return;
+    await animateAltitudeAtCurrentPosition(
+      launchAltitudeM,
+      800,
+      setDronePosition,
+      () => isRunActive(runToken),
+    );
+    if (!isRunActive(runToken)) return;
     await animateRoute(
-      routes,
+      flightRoutes,
       flightRoute,
       0,
       0.8,
@@ -1519,7 +1596,7 @@ export function DashboardShell() {
     pushIntegrationEvent("Drone Sensor", "Drop-off blocked: ground activity detected at the original delivery zone", "Completed");
     pushIntegrationEvent("Deterministic Safety Engine", "Drone holding safely at the final approach waypoint", "Completed");
 
-    const holdingPoint = interpolateRoute(routes, flightRoute, 0.8);
+    const holdingPoint = interpolateRoute(flightRoutes, flightRoute, 0.8);
     const safetyContext = {
       primaryPoint: mission.mapScene.destination,
       blockedZones: [
@@ -1719,11 +1796,17 @@ export function DashboardShell() {
     }
 
     setApproval(null);
-    const alternateRoutes = routes.map((route) =>
+    const alternateRoutes = flightRoutes.map((route) =>
       route.id === flightRoute
         ? {
             ...route,
-            waypoints: [...route.waypoints.slice(0, -1), finalDropOffPoint],
+            waypoints: [
+              ...route.waypoints.slice(0, -1),
+              {
+                ...finalDropOffPoint,
+                altitude: finalDropOffPoint.altitude + 24,
+              },
+            ],
           }
         : route,
     );
@@ -1772,7 +1855,12 @@ export function DashboardShell() {
 
     if (!isRunActive(runToken)) return;
     pushCommand("Verify drop-off zone");
-    await wait(450);
+    await animateAltitudeAtCurrentPosition(
+      finalDropOffPoint.altitude,
+      900,
+      setDronePosition,
+      () => isRunActive(runToken),
+    );
     if (!isRunActive(runToken)) return;
     setCurrentStatus("DELIVERED");
     setEtaLabel("Delivered");
@@ -3226,7 +3314,15 @@ function animateRoute(
   shouldContinue: () => boolean = () => true,
 ) {
   return new Promise<void>((resolve) => {
-    const startedAt = performance.now();
+    if (prefersReducedMotion()) {
+      setDronePosition(interpolateRoute(routes, routeId, to));
+      setProgress(to);
+      onFrame?.(to);
+      resolve();
+      return;
+    }
+    let elapsedMs = 0;
+    let lastTimestamp: number | null = null;
 
     function tick(now: number) {
       if (!shouldContinue()) {
@@ -3234,8 +3330,10 @@ function animateRoute(
         return;
       }
 
-      const elapsed = now - startedAt;
-      const progress = Math.min(1, elapsed / durationMs);
+      const deltaMs = lastTimestamp === null ? 0 : Math.min(120, Math.max(0, now - lastTimestamp));
+      lastTimestamp = now;
+      if (!document.hidden) elapsedMs += deltaMs;
+      const progress = Math.min(1, elapsedMs / Math.max(1, durationMs));
       const routeProgress = from + (to - from) * progress;
       setDronePosition(interpolateRoute(routes, routeId, routeProgress));
       setProgress(routeProgress);
@@ -3260,8 +3358,15 @@ function animateAltitudeAtCurrentPosition(
   shouldContinue: () => boolean = () => true,
 ) {
   return new Promise<void>((resolve) => {
-    const startedAt = performance.now();
     let startAltitude: number | null = null;
+    let elapsedMs = 0;
+    let lastTimestamp: number | null = null;
+
+    if (prefersReducedMotion()) {
+      setDronePosition((current) => ({ ...current, altitude: altitudeM }));
+      resolve();
+      return;
+    }
 
     function tick(now: number) {
       if (!shouldContinue()) {
@@ -3269,8 +3374,10 @@ function animateAltitudeAtCurrentPosition(
         return;
       }
 
-      const elapsed = now - startedAt;
-      const progress = Math.min(1, elapsed / durationMs);
+      const deltaMs = lastTimestamp === null ? 0 : Math.min(120, Math.max(0, now - lastTimestamp));
+      lastTimestamp = now;
+      if (!document.hidden) elapsedMs += deltaMs;
+      const progress = Math.min(1, elapsedMs / Math.max(1, durationMs));
       setDronePosition((current) => {
         startAltitude ??= current.altitude;
         return { ...current, altitude: startAltitude + (altitudeM - startAltitude) * progress };

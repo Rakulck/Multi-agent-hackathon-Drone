@@ -1,5 +1,13 @@
 import { SCENE_LABEL } from "@/data/demo-scene";
 import type { DropOffZone, GeoPoint3D, MissionMapScene, RouteId, RouteStatus } from "@/types/domain";
+import {
+  buildReroutePath,
+  deriveMissionVisualState,
+  prefersReducedMotion,
+  sampleRouteByDistance,
+  splitRouteAtProgress,
+} from "@/lib/map/mission-animation";
+import type { MapMissionAnimationContext } from "@/types/map";
 
 const routeColors: Record<RouteStatus, string> = {
   candidate: "#171717",
@@ -8,7 +16,7 @@ const routeColors: Record<RouteStatus, string> = {
   blocked: "#ef4444",
 };
 
-interface MapFallbackProps {
+interface MapFallbackProps extends MapMissionAnimationContext {
   reason: string;
   routeStatuses: Record<RouteId, RouteStatus>;
   selectedRoute: RouteId | null;
@@ -18,6 +26,8 @@ interface MapFallbackProps {
   scene: MissionMapScene;
   onRetry: () => void;
   airspaceVisible?: boolean;
+  selectedDrone?: string;
+  statusLabel?: string;
 }
 
 /**
@@ -35,12 +45,67 @@ export function MapFallback({
   scene,
   onRetry,
   airspaceVisible = false,
+  approvalStatus,
+  batteryPercent,
+  memory,
+  missionRun,
+  missionStatus,
+  plannedSpeedMph,
+  routeProgress = 0,
+  selectedDrone = "Atlas HeavyLift",
+  statusLabel = "MISSION",
 }: MapFallbackProps) {
   const bounds = projectionBoundsForScene(scene);
-  const drone = projectFallbackPoint(dronePosition, bounds);
+  const reducedMotion = prefersReducedMotion();
+  const visualState = deriveMissionVisualState({
+    approvalStatus,
+    hazardVisible,
+    memory,
+    missionRun,
+    missionStatus,
+    routeStatuses,
+    selectedRoute,
+  });
+  const activeRoute = scene.routes.find((route) => route.id === visualState.currentRoute);
+  const activeSample = activeRoute ? sampleRouteByDistance(activeRoute.waypoints, routeProgress) : null;
+  const visualDronePosition =
+    activeRoute && visualState.currentRoute !== selectedRoute ? activeSample!.position : dronePosition;
+  const drone = projectFallbackPoint(visualDronePosition, bounds);
   const dropOff = projectFallbackPoint(dropOffZone.point, bounds);
+  const hazardPoint = projectFallbackPoint(
+    {
+      lat: memory?.latitude ?? scene.hazard.center.lat,
+      lng: memory?.longitude ?? scene.hazard.center.lng,
+      altitude: memory?.altitudeBandM[1] ?? scene.hazard.center.altitude,
+    },
+    bounds,
+  );
+  const hazardRadius = Math.max(
+    34,
+    ((memory?.avoidanceRadiusM ?? 120) / 111_320 / (bounds.maxLat - bounds.minLat)) * 300,
+  );
   const corridorPoints = scene.airspace.permittedCorridor.map((point) => projectFallbackPoint(point, bounds));
   const corridorPath = corridorPoints.map((point, index) => `${index === 0 ? "M" : "L"}${point.x} ${point.y}`).join(" ") + " Z";
+  const routePaths = scene.routes.map((route) => ({
+    ...route,
+    path: fallbackPath(route.waypoints, bounds),
+  }));
+  const activeSplit = activeRoute ? splitRouteAtProgress(activeRoute.waypoints, routeProgress) : null;
+  const completedPath = activeSplit ? fallbackPath(activeSplit.completed, bounds) : "";
+  const remainingPath = activeSplit ? fallbackPath(activeSplit.remaining, bounds) : "";
+  const routeA = scene.routes.find((route) => route.id === "A");
+  const connectorPath =
+    missionRun === "MISSION_1" && visualState.currentRoute === "C" && routeA
+      ? fallbackPath(
+          buildReroutePath(
+            sampleRouteByDistance(routeA.waypoints, 0.58).position,
+            activeRoute?.waypoints ?? scene.routes.find((route) => route.id === "C")!.waypoints,
+          ).slice(0, 2),
+          bounds,
+        )
+      : "";
+  const altitudeBand = memory?.altitudeBandM ?? [90, 148];
+  const droneAsset = selectedDrone.includes("CargoSwift") ? "/demo/drone-cargoswift.svg" : "/demo/drone-top.svg";
 
   return (
     <div className="relative flex h-full min-h-0 items-center justify-center overflow-hidden rounded-[28px] bg-white">
@@ -56,24 +121,119 @@ export function MapFallback({
             })}
           </>
         ) : null}
-        <path d="M90 340 C250 180 410 130 790 110" stroke={routeColors[routeStatuses.A]} strokeWidth={selectedRoute === "A" ? 9 : 6} fill="none" />
-        <path d="M90 340 C260 320 460 250 790 110" stroke={routeColors[routeStatuses.B]} strokeWidth={selectedRoute === "B" ? 9 : 6} fill="none" />
-        <path d="M90 340 C230 410 530 390 790 110" stroke={routeColors[routeStatuses.C]} strokeWidth={selectedRoute === "C" ? 9 : 6} fill="none" />
-        {hazardVisible ? <circle cx="505" cy="175" r="46" fill="rgba(239,68,68,0.3)" stroke="#ef4444" strokeWidth="4" /> : null}
-        <circle cx="90" cy="340" r="12" fill="#93c5fd" />
-        <circle cx="790" cy="110" r="12" fill="#34d399" />
+        {routePaths.map((route) => (
+          <path
+            key={route.id}
+            d={route.path}
+            stroke={routeColors[visualState.displayStatuses[route.id]]}
+            strokeWidth={visualState.currentRoute === route.id ? 8 : 5}
+            fill="none"
+            strokeLinejoin="round"
+          />
+        ))}
+        {activeRoute && visualState.displayStatuses[activeRoute.id] === "selected" ? (
+          <>
+            <path d={remainingPath} stroke="#4ade80" strokeWidth="9" fill="none" strokeDasharray="14 9">
+              {!reducedMotion ? <animate attributeName="stroke-dashoffset" from="23" to="0" dur="1.4s" repeatCount="indefinite" /> : null}
+            </path>
+            <path d={completedPath} stroke="#166534" strokeWidth="9" fill="none" />
+          </>
+        ) : null}
+        {connectorPath ? <path d={connectorPath} stroke="#22c55e" strokeWidth="7" fill="none" strokeDasharray="8 6" /> : null}
+        {hazardVisible ? (
+          <g>
+            <ellipse
+              cx={hazardPoint.x}
+              cy={hazardPoint.y + 16}
+              rx={hazardRadius}
+              ry={hazardRadius * 0.42}
+              fill="rgba(239,68,68,0.12)"
+              stroke="#ef4444"
+              strokeWidth="3"
+            />
+            <ellipse
+              cx={hazardPoint.x}
+              cy={hazardPoint.y - 18}
+              rx={hazardRadius}
+              ry={hazardRadius * 0.42}
+              fill="rgba(239,68,68,0.22)"
+              stroke="#ef4444"
+              strokeWidth="3"
+            />
+            <path
+              d={`M${hazardPoint.x - hazardRadius} ${hazardPoint.y - 18}v34M${hazardPoint.x + hazardRadius} ${hazardPoint.y - 18}v34`}
+              stroke="#ef4444"
+              strokeWidth="2"
+              opacity=".7"
+            />
+            {!visualState.hazardVerified ? (
+              <ellipse
+                cx={hazardPoint.x}
+                cy={hazardPoint.y - 18}
+                rx={hazardRadius}
+                ry={hazardRadius * 0.42}
+                fill="none"
+                stroke="#f87171"
+                strokeWidth="5"
+              >
+                {!reducedMotion ? <animate attributeName="opacity" values=".2;1;.2" dur="1.5s" repeatCount="indefinite" /> : null}
+              </ellipse>
+            ) : null}
+            <image
+              href="/demo/crane-marker.svg"
+              x={hazardPoint.x - 28}
+              y={hazardPoint.y - 92}
+              width="56"
+              height="68"
+              aria-label="Construction Crane"
+            />
+            <text x={hazardPoint.x} y={hazardPoint.y + 55} textAnchor="middle" fill="#991b1b" fontSize="13" fontWeight="800">
+              Route A BLOCKED · {altitudeBand[0]}–{altitudeBand[1]} m
+            </text>
+          </g>
+        ) : null}
+        <circle cx={projectFallbackPoint(scene.origin, bounds).x} cy={projectFallbackPoint(scene.origin, bounds).y} r="10" fill="#93c5fd" />
+        <circle cx={projectFallbackPoint(scene.destination, bounds).x} cy={projectFallbackPoint(scene.destination, bounds).y} r="10" fill="#34d399" />
         <circle cx={dropOff.x} cy={dropOff.y} r="9" fill="none" stroke="#171717" strokeDasharray="3 3" strokeWidth="2.5" />
-        <circle cx={drone.x} cy={drone.y} r="14" fill="#000000" />
-        <circle cx={drone.x} cy={drone.y} r="5" fill="#ffffff" />
+        <g transform={`translate(${drone.x} ${drone.y}) rotate(${activeSample?.headingDeg ?? 0})`}>
+          <image href={droneAsset} x="-34" y="-34" width="68" height="68" aria-label={`${selectedDrone} delivery drone`} />
+          <path d="M0-42 -6-31H6Z" fill="#16a34a" />
+        </g>
         {airspaceVisible ? (
           <text x="420" y="40" textAnchor="middle" fill="#166534" fontSize="14" fontWeight="700">
             {scene.airspace.corridorLabel} · {scene.airspace.maxAltitudeAglFt} ft AGL
           </text>
         ) : null}
       </svg>
+      <div className="pointer-events-none absolute left-4 top-4 rounded-2xl border border-neutral-200 bg-white/92 p-3 shadow-lg backdrop-blur">
+        <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-neutral-500">Route status</p>
+        <div className="mt-2 flex gap-3">
+          {(["A", "B", "C"] as RouteId[]).map((id) => (
+            <span key={id} className="text-[10px] font-bold uppercase text-neutral-700">
+              {id} · {id === "C" && visualState.routeCRecommended ? "Recommended" : visualState.displayStatuses[id]}
+            </span>
+          ))}
+        </div>
+      </div>
+      <div className="pointer-events-none absolute right-4 top-4 rounded-2xl border border-neutral-200 bg-white/92 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.1em] text-neutral-700 shadow-lg backdrop-blur">
+        <p>{statusLabel} · Route {visualState.currentRoute ?? "-"}</p>
+        <p>{selectedDrone} · {Math.round(visualDronePosition.altitude)} m · {Math.round(plannedSpeedMph ?? 0)} mph</p>
+        {batteryPercent !== null && batteryPercent !== undefined ? <p>{Math.round(batteryPercent)}% battery</p> : null}
+        <p>Hazard memory: {visualState.memoryLabel}</p>
+      </div>
+      {visualState.eventLabel ? (
+        <div className="pointer-events-none absolute left-1/2 top-4 -translate-x-1/2 rounded-full border border-neutral-200 bg-white/95 px-4 py-2 text-[11px] font-bold text-neutral-900 shadow-lg">
+          {visualState.eventLabel}
+        </div>
+      ) : null}
+      {visualState.sourceLabel ? (
+        <div className="pointer-events-none absolute bottom-16 left-1/2 -translate-x-1/2 rounded-full bg-neutral-950/90 px-4 py-2 text-[10px] font-bold uppercase tracking-[0.08em] text-white">
+          {visualState.sourceLabel}
+        </div>
+      ) : null}
       <div className="absolute bottom-4 right-4 flex items-center gap-2">
         <span className="rounded-full border border-neutral-200 bg-white/90 px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-neutral-600 backdrop-blur">
-          {reason}
+          Fallback map · {reason}
         </span>
         <button
           type="button"
@@ -102,6 +262,15 @@ interface ProjectionBounds {
   maxLat: number;
   minLng: number;
   maxLng: number;
+}
+
+function fallbackPath(points: GeoPoint3D[], bounds: ProjectionBounds): string {
+  return points
+    .map((point, index) => {
+      const projected = projectFallbackPoint(point, bounds);
+      return `${index === 0 ? "M" : "L"}${projected.x} ${projected.y}`;
+    })
+    .join(" ");
 }
 
 /** Derives a padded bounding box from the mission's actual origin/destination so the schematic still lines up for real, geocoded addresses. */

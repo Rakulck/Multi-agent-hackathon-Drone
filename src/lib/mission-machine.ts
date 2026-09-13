@@ -11,6 +11,7 @@ import {
   buildSharedCorridorDemoScene,
   defaultMapScene,
 } from "@/lib/map/route-warp";
+import { sampleRouteByDistance } from "@/lib/map/mission-animation";
 import type {
   AirspaceEval,
   AirspaceRouteResult,
@@ -217,23 +218,7 @@ export function interpolateRoute(routes: DemoRoute[], routeId: RouteId, progress
     throw new Error(`Unknown route ${routeId}.`);
   }
 
-  const clampedProgress = Math.min(1, Math.max(0, progress));
-  const segments = route.waypoints.length - 1;
-  const rawIndex = clampedProgress * segments;
-  const index = Math.min(Math.floor(rawIndex), segments - 1);
-  const localProgress = rawIndex - index;
-  const start = route.waypoints[index];
-  const end = route.waypoints[index + 1];
-
-  return {
-    lat: lerp(start.lat, end.lat, localProgress),
-    lng: lerp(start.lng, end.lng, localProgress),
-    altitude: lerp(start.altitude, end.altitude, localProgress),
-  };
-}
-
-function lerp(start: number, end: number, progress: number) {
-  return start + (end - start) * progress;
+  return sampleRouteByDistance(route.waypoints, progress).position;
 }
 
 function minimumRouteDistanceM(latitude: number, longitude: number, waypoints: GeoPoint3D[]) {

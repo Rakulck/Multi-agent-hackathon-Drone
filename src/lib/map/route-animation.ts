@@ -35,6 +35,7 @@ export class RouteAnimationEngine {
   private targetSpeedMph = DEFAULT_CRUISE_SPEED_MPH;
   private currentSpeedMph = 0;
   private targetAltitudeM: number | null = null;
+  private altitudeOverrideM: number | null = null;
 
   private paused = true;
   private running = false;
@@ -87,6 +88,7 @@ export class RouteAnimationEngine {
     this.currentSpeedMph = 0;
     this.targetSpeedMph = DEFAULT_CRUISE_SPEED_MPH;
     this.targetAltitudeM = null;
+    this.altitudeOverrideM = null;
     this.paused = false;
     this.running = true;
     this.lastTimestamp = null;
@@ -113,6 +115,7 @@ export class RouteAnimationEngine {
 
   changeAltitude(altitudeFeet: number): void {
     this.targetAltitudeM = altitudeFeet / 3.28084;
+    this.altitudeOverrideM ??= this.position.altitudeM;
   }
 
   /**
@@ -163,6 +166,7 @@ export class RouteAnimationEngine {
     this.currentSpeedMph = 0;
     this.targetSpeedMph = DEFAULT_CRUISE_SPEED_MPH;
     this.targetAltitudeM = null;
+    this.altitudeOverrideM = null;
     this.paused = true;
     this.running = false;
   }
@@ -237,16 +241,6 @@ export class RouteAnimationEngine {
     }
     this.callbacks.onSpeedChange?.(this.currentSpeedMph);
 
-    if (this.targetAltitudeM !== null) {
-      const altStep = (Math.abs(this.targetAltitudeM - this.position.altitudeM) * dtMs) / DEFAULT_ALTITUDE_TRANSITION_MS;
-      if (this.position.altitudeM < this.targetAltitudeM) {
-        this.position = { ...this.position, altitudeM: Math.min(this.targetAltitudeM, this.position.altitudeM + altStep) };
-      } else if (this.position.altitudeM > this.targetAltitudeM) {
-        this.position = { ...this.position, altitudeM: Math.max(this.targetAltitudeM, this.position.altitudeM - altStep) };
-      }
-      this.callbacks.onAltitudeChange?.(metersToFeet(this.position.altitudeM));
-    }
-
     if (this.waypoints.length < 2) {
       return;
     }
@@ -255,6 +249,20 @@ export class RouteAnimationEngine {
 
     if (distanceKm > 0) {
       this.advanceAlongRoute(distanceKm);
+    }
+
+    if (this.targetAltitudeM !== null) {
+      const currentAltitudeM = this.altitudeOverrideM ?? this.position.altitudeM;
+      const altStep = (Math.abs(this.targetAltitudeM - currentAltitudeM) * dtMs) / DEFAULT_ALTITUDE_TRANSITION_MS;
+      if (currentAltitudeM < this.targetAltitudeM) {
+        this.altitudeOverrideM = Math.min(this.targetAltitudeM, currentAltitudeM + altStep);
+      } else if (currentAltitudeM > this.targetAltitudeM) {
+        this.altitudeOverrideM = Math.max(this.targetAltitudeM, currentAltitudeM - altStep);
+      } else {
+        this.altitudeOverrideM = currentAltitudeM;
+      }
+      this.position = { ...this.position, altitudeM: this.altitudeOverrideM };
+      this.callbacks.onAltitudeChange?.(metersToFeet(this.altitudeOverrideM));
     }
 
     this.emitPosition();

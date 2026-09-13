@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="96" viewBox="0 0 80 96" role="img" aria-labelledby="title desc">
+  <title id="title">Construction crane</title>
+  <desc id="desc">High-contrast yellow tower crane marking a blocked flight corridor.</desc>
+  <defs>
+    <filter id="shadow" x="-30%" y="-20%" width="170%" height="150%">
+      <feDropShadow dx="0" dy="4" stdDeviation="3" flood-color="#450a0a" flood-opacity=".4"/>
+    </filter>
+  </defs>
+  <g filter="url(#shadow)" stroke="#451a03" stroke-width="3" stroke-linejoin="round">
+    <path d="M30 88h20L45 22H35l-5 66Z" fill="#facc15"/>
+    <path d="M34 72h12M33 56h14M34 40h12M31 88l17-32M49 88 32 56" fill="none"/>
+    <path d="M15 18h56v9H15z" fill="#facc15"/>
+    <path d="M33 9h13l4 9H29l4-9Z" fill="#f59e0b"/>
+    <path d="M17 27 7 40h15l-5-13ZM62 27v29" fill="none"/>
+    <path d="M57 56h10l-2 11h-6l-2-11Z" fill="#ef4444"/>
+    <path d="M29 22 16 18M50 22l12-4" fill="none"/>
+  </g>
+</svg>

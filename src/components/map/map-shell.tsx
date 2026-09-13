@@ -1,9 +1,9 @@
 import { GoogleMaps3DView } from "@/components/map/google-maps-3d-view";
 import type { DropOffZone, GeoPoint3D, MissionMapScene, RouteId, RouteLegendItem, RouteStatus } from "@/types/domain";
-import type { DroneMapHandle } from "@/types/map";
+import type { DroneMapHandle, MapMissionAnimationContext } from "@/types/map";
 import { forwardRef } from "react";
 
-interface MapShellProps {
+export interface MapShellProps extends MapMissionAnimationContext {
   routes: RouteLegendItem[];
   routeStatuses: Record<RouteId, RouteStatus>;
   selectedRoute: RouteId | null;
