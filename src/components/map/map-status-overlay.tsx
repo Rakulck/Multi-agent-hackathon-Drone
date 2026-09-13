@@ -4,10 +4,8 @@ interface MapStatusOverlayProps {
   altitudeM: number;
   batteryPercent?: number | null;
   flightMode: string;
-  droneName: string;
   routeId: string | null;
   followEnabled: boolean;
-  dropOffLabel: string;
   hazardStatus: string;
   speedMph?: number | null;
 }
@@ -21,10 +19,8 @@ export function MapStatusOverlay({
   altitudeM,
   batteryPercent,
   flightMode,
-  droneName,
   routeId,
   followEnabled,
-  dropOffLabel,
   hazardStatus,
   speedMph,
 }: MapStatusOverlayProps) {
@@ -35,7 +31,6 @@ export function MapStatusOverlay({
         <span aria-hidden="true">·</span>
         <span>Route {routeId ?? "-"}</span>
       </div>
-      <p className="mt-1">{droneName}</p>
       <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
         <span>{altitudeM} m</span>
         <span>{speedMph === null || speedMph === undefined ? "--" : Math.round(speedMph)} mph</span>
@@ -43,7 +38,6 @@ export function MapStatusOverlay({
       </div>
       <p>Hazard memory: {hazardStatus}</p>
       <p>Camera: {followEnabled ? "Follow Drone" : "Overview"}</p>
-      <p className="mt-1 max-w-[230px] truncate normal-case tracking-normal text-neutral-500">Drop-off: {dropOffLabel}</p>
     </div>
   );
 }

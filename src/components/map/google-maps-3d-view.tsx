@@ -7,10 +7,10 @@ import { MapFallback } from "@/components/map/map-fallback";
 import { MapLoadingState } from "@/components/map/map-loading-state";
 import { MapSimulatedEnvironmentLabel, MapStatusOverlay } from "@/components/map/map-status-overlay";
 import { MapTestControls } from "@/components/map/map-test-controls";
-import { altitudeObstacle as altitudeObstacleDef, demoRouteWaypoints } from "@/data/demo-scene";
+import { demoRouteWaypoints } from "@/data/demo-scene";
 import { useDroneSimulation } from "@/hooks/use-drone-simulation";
 import { createCameraController, type CameraController, type Map3DLike } from "@/lib/map/camera-controller";
-import { bearingDegrees, metersToFeet } from "@/lib/map/geo-utils";
+import { bearingDegrees } from "@/lib/map/geo-utils";
 import { importGoogleMapsLibrary } from "@/lib/map/load-google-maps";
 import {
   buildReroutePath,
@@ -332,33 +332,13 @@ export const GoogleMaps3DView = forwardRef<DroneMapHandle, GoogleMaps3DViewProps
         routeConnector.style.display = "none";
         map.append(routeConnector);
 
-        const originMarker = new Marker3DElement({ altitudeMode, label: scene.originLabel, position: scene.origin });
-        const destinationMarker = new Marker3DElement({
-          altitudeMode,
-          label: scene.destinationLabel,
-          position: scene.destination,
-        });
-        map.append(originMarker);
-        map.append(destinationMarker);
-
-        const dropOffMarker = new Marker3DElement({ altitudeMode, label: dropOffZone.label, position: dropOffZone.point });
-        map.append(dropOffMarker);
-
-        const altDropOffAMarker = new Marker3DElement({
-          altitudeMode,
-          label: "Terrace",
-          position: scene.alternateDropOffA,
-        });
-        altDropOffAMarker.style.display = "none";
-        map.append(altDropOffAMarker);
-
-        const altDropOffBMarker = new Marker3DElement({
-          altitudeMode,
-          label: "Front Entrance",
-          position: scene.alternateDropOffB,
-        });
-        altDropOffBMarker.style.display = "none";
-        map.append(altDropOffBMarker);
+        // Keep the flight corridor legible: location pins and text labels live
+        // in the surrounding mission UI, not over the 3D route geometry.
+        const originMarker: MapEl | null = null;
+        const destinationMarker: MapEl | null = null;
+        const dropOffMarker: MapEl | null = null;
+        const altDropOffAMarker: MapEl | null = null;
+        const altDropOffBMarker: MapEl | null = null;
 
         const hazardCenter = {
           lat: memory?.latitude ?? scene.hazard.center.lat,
@@ -393,7 +373,6 @@ export const GoogleMaps3DView = forwardRef<DroneMapHandle, GoogleMaps3DViewProps
         const craneMarker = new Marker3DElement({
           altitudeMode,
           drawsWhenOccluded: true,
-          label: `Construction Crane · Route A blocked · ${Math.round(hazardMinM)}–${Math.round(hazardMaxM)} m`,
           position: { ...hazardCenter, altitude: hazardMaxM },
           sizePreserved: true,
           zIndex: 30,
@@ -402,15 +381,7 @@ export const GoogleMaps3DView = forwardRef<DroneMapHandle, GoogleMaps3DViewProps
         craneMarker.style.display = hazardVisible ? "block" : "none";
         map.append(craneMarker);
 
-        const altitudeObstacleMarker = new Marker3DElement({
-          altitudeMode,
-          label: `Altitude obstruction · ${Math.round(metersToFeet(altitudeObstacleDef.minAltitudeM))}-${Math.round(
-            metersToFeet(altitudeObstacleDef.maxAltitudeM),
-          )} ft`,
-          position: scene.secondObstacle,
-        });
-        altitudeObstacleMarker.style.display = "none";
-        map.append(altitudeObstacleMarker);
+        const altitudeObstacleMarker: MapEl | null = null;
 
         const restrictedPolygons = scene.airspace.restrictedPolygons.map((polygon) => {
           const el = new Polygon3DElement({
@@ -437,13 +408,7 @@ export const GoogleMaps3DView = forwardRef<DroneMapHandle, GoogleMaps3DViewProps
         permittedCorridor.style.display = airspaceVisible ? "block" : "none";
         map.append(permittedCorridor);
 
-        const altitudeCeilingMarker = new Marker3DElement({
-          altitudeMode,
-          label: `Ceiling ${scene.airspace.maxAltitudeAglFt} ft AGL · ${scene.airspace.corridorLabel}`,
-          position: scene.airspace.altitudeCeilingAnchor,
-        });
-        altitudeCeilingMarker.style.display = airspaceVisible ? "block" : "none";
-        map.append(altitudeCeilingMarker);
+        const altitudeCeilingMarker: MapEl | null = null;
 
         const droneMarker = new Marker3DElement({
           altitudeMode,
@@ -634,14 +599,7 @@ export const GoogleMaps3DView = forwardRef<DroneMapHandle, GoogleMaps3DViewProps
     headingRef.current = heading;
 
     droneMarker.position = gatedPosition;
-    const importantLabel =
-      visualState.eventLabel ||
-      ["HOLD", "REROUTING", "TAKEOFF", "APPROACH", "DELIVERED"].includes(statusLabel);
-    if (importantLabel) {
-      droneMarker.label = `${selectedDrone ?? "Atlas HeavyLift"} · ${statusLabel} · ${Math.round(gatedPosition.altitude)} m`;
-    } else {
-      droneMarker.removeAttribute("label");
-    }
+    droneMarker.removeAttribute("label");
     if (droneImage) {
       const isCargoSwift = selectedDrone?.includes("CargoSwift");
       const source = isCargoSwift ? "/demo/drone-cargoswift.svg" : "/demo/drone-top.svg";
@@ -705,7 +663,7 @@ export const GoogleMaps3DView = forwardRef<DroneMapHandle, GoogleMaps3DViewProps
 
     const position = debugSim.telemetry.position;
     droneMarker.position = { altitude: position.altitudeM, lat: position.lat, lng: position.lng };
-    droneMarker.label = `${debugDroneLabel} · Route ${debugSim.telemetry.routeId ?? "-"} · ${Math.round(debugSim.telemetry.altitudeFt)} ft`;
+    droneMarker.removeAttribute("label");
 
     if (followEnabled) {
       cameraControllerRef.current?.focusOnDrone(position, debugSim.telemetry.headingDeg);
@@ -765,7 +723,7 @@ export const GoogleMaps3DView = forwardRef<DroneMapHandle, GoogleMaps3DViewProps
     }
     if (craneMarker) {
       craneMarker.position = { ...center, altitude: maximumM };
-      craneMarker.label = `Construction Crane · Route A blocked · ${Math.round(minimumM)}–${Math.round(maximumM)} m`;
+      craneMarker.removeAttribute("label");
     }
   }, [loadState, memory, scene.hazard.center]);
 
@@ -860,7 +818,6 @@ export const GoogleMaps3DView = forwardRef<DroneMapHandle, GoogleMaps3DViewProps
   }, [debugSim, routeStatuses]);
 
   const displayedFlightMode = debugMode ? (debugSim.telemetry.isPaused ? "PAUSED" : "SIMULATING") : statusLabel;
-  const displayedDroneName = debugMode ? debugDroneLabel : selectedDrone ?? "Atlas HeavyLift";
   const displayedRouteId = debugMode ? debugSim.telemetry.routeId : visualState.currentRoute;
   const altitudeCallout =
     altitudeStartM !== null && Math.abs(dronePosition.altitude - altitudeStartM) >= 2
@@ -999,22 +956,10 @@ export const GoogleMaps3DView = forwardRef<DroneMapHandle, GoogleMaps3DViewProps
         </div>
       ) : null}
 
-      {airspaceVisible ? (
-        <div className="pointer-events-none absolute bottom-20 left-4 max-w-[280px] rounded-[18px] border border-emerald-200 bg-white/90 p-3 shadow-[0_12px_36px_rgba(0,0,0,0.12)] backdrop-blur">
-          <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-emerald-700">Airspace Overlay</p>
-          <p className="mt-1 text-xs font-semibold text-black">{scene.airspace.corridorLabel}</p>
-          <p className="mt-1 text-[11px] text-neutral-600">
-            Ceiling {scene.airspace.maxAltitudeAglFt} ft AGL · red = restricted · green = candidate corridor
-          </p>
-        </div>
-      ) : null}
-
       <MapStatusOverlay
         altitudeM={debugMode ? Math.round(debugSim.telemetry.position.altitudeM) : Math.round(dronePosition.altitude)}
         batteryPercent={batteryPercent}
-        dropOffLabel={dropOffZone.label}
         flightMode={displayedFlightMode}
-        droneName={displayedDroneName}
         followEnabled={followEnabled}
         hazardStatus={visualState.memoryLabel}
         routeId={displayedRouteId}

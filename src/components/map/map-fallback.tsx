@@ -41,7 +41,6 @@ export function MapFallback({
   selectedRoute,
   hazardVisible,
   dronePosition,
-  dropOffZone,
   scene,
   onRetry,
   airspaceVisible = false,
@@ -71,7 +70,6 @@ export function MapFallback({
   const visualDronePosition =
     activeRoute && visualState.currentRoute !== selectedRoute ? activeSample!.position : dronePosition;
   const drone = projectFallbackPoint(visualDronePosition, bounds);
-  const dropOff = projectFallbackPoint(dropOffZone.point, bounds);
   const hazardPoint = projectFallbackPoint(
     {
       lat: memory?.latitude ?? scene.hazard.center.lat,
@@ -192,18 +190,10 @@ export function MapFallback({
             </text>
           </g>
         ) : null}
-        <circle cx={projectFallbackPoint(scene.origin, bounds).x} cy={projectFallbackPoint(scene.origin, bounds).y} r="10" fill="#93c5fd" />
-        <circle cx={projectFallbackPoint(scene.destination, bounds).x} cy={projectFallbackPoint(scene.destination, bounds).y} r="10" fill="#34d399" />
-        <circle cx={dropOff.x} cy={dropOff.y} r="9" fill="none" stroke="#171717" strokeDasharray="3 3" strokeWidth="2.5" />
         <g transform={`translate(${drone.x} ${drone.y}) rotate(${activeSample?.headingDeg ?? 0})`}>
           <image href={droneAsset} x="-34" y="-34" width="68" height="68" aria-label={`${selectedDrone} delivery drone`} />
           <path d="M0-42 -6-31H6Z" fill="#16a34a" />
         </g>
-        {airspaceVisible ? (
-          <text x="420" y="40" textAnchor="middle" fill="#166534" fontSize="14" fontWeight="700">
-            {scene.airspace.corridorLabel} · {scene.airspace.maxAltitudeAglFt} ft AGL
-          </text>
-        ) : null}
       </svg>
       <div className="pointer-events-none absolute left-4 top-4 rounded-2xl border border-neutral-200 bg-white/92 p-3 shadow-lg backdrop-blur">
         <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-neutral-500">Route status</p>
@@ -217,7 +207,7 @@ export function MapFallback({
       </div>
       <div className="pointer-events-none absolute right-4 top-4 rounded-2xl border border-neutral-200 bg-white/92 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.1em] text-neutral-700 shadow-lg backdrop-blur">
         <p>{statusLabel} · Route {visualState.currentRoute ?? "-"}</p>
-        <p>{selectedDrone} · {Math.round(visualDronePosition.altitude)} m · {Math.round(plannedSpeedMph ?? 0)} mph</p>
+        <p>{Math.round(visualDronePosition.altitude)} m · {Math.round(plannedSpeedMph ?? 0)} mph</p>
         {batteryPercent !== null && batteryPercent !== undefined ? <p>{Math.round(batteryPercent)}% battery</p> : null}
         <p>Hazard memory: {visualState.memoryLabel}</p>
       </div>
