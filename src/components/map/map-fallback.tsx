@@ -9,12 +9,15 @@ import {
 } from "@/lib/map/mission-animation";
 import type { MapMissionAnimationContext } from "@/types/map";
 
-const routeColors: Record<RouteStatus, string> = {
-  candidate: "#171717",
-  selected: "#22c55e",
-  warning: "#f59e0b",
-  blocked: "#ef4444",
+const routeColors: Record<RouteId, { base: string; completed: string; remaining: string }> = {
+  A: { base: "#2563eb", completed: "#1e3a8a", remaining: "#3b82f6" },
+  B: { base: "#f59e0b", completed: "#92400e", remaining: "#fbbf24" },
+  C: { base: "#16a34a", completed: "#166534", remaining: "#4ade80" },
 };
+
+function routeStrokeColor(id: RouteId, status: RouteStatus): string {
+  return status === "blocked" ? "#ef4444" : routeColors[id].base;
+}
 
 interface MapFallbackProps extends MapMissionAnimationContext {
   reason: string;
@@ -123,7 +126,7 @@ export function MapFallback({
           <path
             key={route.id}
             d={route.path}
-            stroke={routeColors[visualState.displayStatuses[route.id]]}
+            stroke={routeStrokeColor(route.id, visualState.displayStatuses[route.id])}
             strokeWidth={visualState.currentRoute === route.id ? 8 : 5}
             fill="none"
             strokeLinejoin="round"
@@ -131,10 +134,16 @@ export function MapFallback({
         ))}
         {activeRoute && visualState.displayStatuses[activeRoute.id] === "selected" ? (
           <>
-            <path d={remainingPath} stroke="#4ade80" strokeWidth="9" fill="none" strokeDasharray="14 9">
+            <path
+              d={remainingPath}
+              stroke={routeColors[activeRoute.id].remaining}
+              strokeWidth="9"
+              fill="none"
+              strokeDasharray="14 9"
+            >
               {!reducedMotion ? <animate attributeName="stroke-dashoffset" from="23" to="0" dur="1.4s" repeatCount="indefinite" /> : null}
             </path>
-            <path d={completedPath} stroke="#166534" strokeWidth="9" fill="none" />
+            <path d={completedPath} stroke={routeColors[activeRoute.id].completed} strokeWidth="9" fill="none" />
           </>
         ) : null}
         {connectorPath ? <path d={connectorPath} stroke="#22c55e" strokeWidth="7" fill="none" strokeDasharray="8 6" /> : null}
@@ -237,11 +246,6 @@ export function MapFallback({
         <span className="rounded-full border border-neutral-200 bg-white/80 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-neutral-500 backdrop-blur">
           {SCENE_LABEL}
         </span>
-        {airspaceVisible && scene.airspace.authorizationRequired ? (
-          <span className="rounded-full border border-red-300 bg-red-50/95 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-red-800 backdrop-blur">
-            Authorization Required
-          </span>
-        ) : null}
       </div>
     </div>
   );

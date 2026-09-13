@@ -27,13 +27,15 @@ import type { CameraState, DroneMapHandle, MapMissionAnimationContext } from "@/
 
 type MapEl = HTMLElement & Record<string, unknown>;
 
-const routeColors: Record<RouteStatus | "inactive", string> = {
-  candidate: "#171717",
-  selected: "#22c55e",
-  warning: "#f59e0b",
-  blocked: "#ef4444",
-  inactive: "#9ca3af",
+const routeColors: Record<RouteId, { base: string; completed: string; remaining: string }> = {
+  A: { base: "#2563eb", completed: "#1e3a8a", remaining: "#3b82f6" },
+  B: { base: "#f59e0b", completed: "#92400e", remaining: "#fbbf24" },
+  C: { base: "#16a34a", completed: "#166534", remaining: "#4ade80" },
 };
+
+function routeStrokeColor(id: RouteId, status: RouteStatus): string {
+  return status === "blocked" ? "#ef4444" : routeColors[id].base;
+}
 
 interface ElementRegistry {
   map: MapEl | null;
@@ -125,13 +127,6 @@ export interface GoogleMaps3DViewProps extends MapMissionAnimationContext {
   /** When true, draw FAA-constrained corridor / restricted polygons / ceiling. */
   airspaceVisible?: boolean;
 }
-
-const routeColorClasses: Record<RouteLegendItem["status"], string> = {
-  candidate: "bg-neutral-900",
-  selected: "bg-emerald-500",
-  warning: "bg-amber-500",
-  blocked: "bg-red-500",
-};
 
 /**
  * Reusable 3D mission-environment component. Creates the Google Maps 3D
@@ -292,7 +287,7 @@ export const GoogleMaps3DView = forwardRef<DroneMapHandle, GoogleMaps3DViewProps
             altitudeMode,
             coordinates: route.waypoints,
             drawsOccludedSegments: true,
-            strokeColor: routeColors[visualState.displayStatuses[route.id]],
+            strokeColor: routeStrokeColor(route.id, visualState.displayStatuses[route.id]),
             strokeWidth: visualState.currentRoute === route.id ? 7 : 5,
           });
           map.append(el);
@@ -302,7 +297,7 @@ export const GoogleMaps3DView = forwardRef<DroneMapHandle, GoogleMaps3DViewProps
             altitudeMode,
             coordinates: route.waypoints.slice(0, 2),
             drawsOccludedSegments: true,
-            strokeColor: "#166534",
+            strokeColor: routeColors[route.id].completed,
             strokeWidth: 9,
             zIndex: 8,
           });
@@ -310,7 +305,7 @@ export const GoogleMaps3DView = forwardRef<DroneMapHandle, GoogleMaps3DViewProps
             altitudeMode,
             coordinates: route.waypoints,
             drawsOccludedSegments: true,
-            strokeColor: "#4ade80",
+            strokeColor: routeColors[route.id].remaining,
             strokeWidth: 9,
             zIndex: 7,
           });
@@ -542,7 +537,7 @@ export const GoogleMaps3DView = forwardRef<DroneMapHandle, GoogleMaps3DViewProps
     (Object.keys(statuses) as RouteId[]).forEach((id) => {
       const el = routeElements[id];
       if (!el) return;
-      el.strokeColor = routeColors[statuses[id]];
+      el.strokeColor = routeStrokeColor(id, statuses[id]);
       el.strokeWidth = active === id ? 7 : 5;
 
       const completed = completedRoutes[id];
@@ -861,10 +856,13 @@ export const GoogleMaps3DView = forwardRef<DroneMapHandle, GoogleMaps3DViewProps
             <div key={route.name} className="min-w-[126px] rounded-2xl bg-white/70 px-3 py-2">
               <div className="flex items-center gap-2">
                 <span
-                  className={cn(
-                    "h-2.5 w-2.5 rounded-full",
-                    routeColorClasses[visualState.displayStatuses[route.id]],
-                  )}
+                  className="h-2.5 w-2.5 rounded-full"
+                  style={{
+                    backgroundColor: routeStrokeColor(
+                      route.id,
+                      visualState.displayStatuses[route.id],
+                    ),
+                  }}
                 />
                 <span className="text-sm font-semibold text-black">{route.name}</span>
               </div>
@@ -947,12 +945,6 @@ export const GoogleMaps3DView = forwardRef<DroneMapHandle, GoogleMaps3DViewProps
       {altitudeCallout ? (
         <div className="pointer-events-none absolute left-1/2 top-24 -translate-x-1/2 rounded-full border border-sky-200 bg-sky-50/95 px-4 py-1.5 text-[11px] font-bold text-sky-900 shadow-lg">
           {altitudeCallout}
-        </div>
-      ) : null}
-
-      {airspaceVisible && scene.airspace.authorizationRequired ? (
-        <div className="pointer-events-none absolute left-1/2 top-16 -translate-x-1/2 rounded-full border border-red-300 bg-red-50/95 px-4 py-1.5 text-[11px] font-bold uppercase tracking-[0.14em] text-red-800 shadow-[0_12px_36px_rgba(0,0,0,0.12)] backdrop-blur">
-          Authorization Required · Mock LAANC · Not submitted
         </div>
       ) : null}
 
