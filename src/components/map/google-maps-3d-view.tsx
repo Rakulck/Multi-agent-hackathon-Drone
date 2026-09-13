@@ -448,7 +448,6 @@ export const GoogleMaps3DView = forwardRef<DroneMapHandle, GoogleMaps3DViewProps
         const droneMarker = new Marker3DElement({
           altitudeMode,
           drawsWhenOccluded: true,
-          label: "",
           position: dronePosition,
           sizePreserved: true,
           zIndex: 40,
@@ -635,11 +634,14 @@ export const GoogleMaps3DView = forwardRef<DroneMapHandle, GoogleMaps3DViewProps
     headingRef.current = heading;
 
     droneMarker.position = gatedPosition;
-    droneMarker.label =
+    const importantLabel =
       visualState.eventLabel ||
-      ["HOLD", "REROUTING", "TAKEOFF", "APPROACH", "DELIVERED"].includes(statusLabel)
-        ? `${selectedDrone ?? "Atlas HeavyLift"} · ${statusLabel} · ${Math.round(gatedPosition.altitude)} m`
-        : "";
+      ["HOLD", "REROUTING", "TAKEOFF", "APPROACH", "DELIVERED"].includes(statusLabel);
+    if (importantLabel) {
+      droneMarker.label = `${selectedDrone ?? "Atlas HeavyLift"} · ${statusLabel} · ${Math.round(gatedPosition.altitude)} m`;
+    } else {
+      droneMarker.removeAttribute("label");
+    }
     if (droneImage) {
       const isCargoSwift = selectedDrone?.includes("CargoSwift");
       const source = isCargoSwift ? "/demo/drone-cargoswift.svg" : "/demo/drone-top.svg";
