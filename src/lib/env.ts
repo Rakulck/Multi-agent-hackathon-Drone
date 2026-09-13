@@ -1,0 +1,27 @@
+const requiredEnvNames = [
+  "NEXT_PUBLIC_GOOGLE_MAPS_API_KEY",
+  "GEMINI_API_KEY",
+  "OPENWEATHER_API_KEY",
+  "AIRTABLE_PERSONAL_ACCESS_TOKEN",
+  "AIRTABLE_BASE_ID",
+  "SLACK_BOT_TOKEN",
+  "SLACK_CHANNEL_ID",
+  "TWILIO_ACCOUNT_SID",
+  "TWILIO_AUTH_TOKEN",
+  "TWILIO_FROM_NUMBER",
+  "TWILIO_TO_NUMBER",
+] as const;
+
+const optionalEnvNames = ["TWILIO_API_KEY_SID", "TWILIO_API_KEY_SECRET", "LEMMA_API_KEY"] as const;
+
+export type RequiredEnvName = (typeof requiredEnvNames)[number];
+export type OptionalEnvName = (typeof optionalEnvNames)[number];
+
+export const envSchema = {
+  required: requiredEnvNames,
+  optional: optionalEnvNames,
+};
+
+export function getMissingEnvNames(env: NodeJS.ProcessEnv = process.env): RequiredEnvName[] {
+  return requiredEnvNames.filter((name) => !env[name]);
+}

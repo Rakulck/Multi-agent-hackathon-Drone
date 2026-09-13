@@ -1,0 +1,37 @@
+@import url("https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Rethink+Sans:wght@400;500;600;700&display=swap");
+@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+  background: #ffffff;
+  --font-geist: "Geist", Arial, Helvetica, sans-serif;
+  --font-rethink-sans: "Rethink Sans", Arial, Helvetica, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+  background: #ffffff;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background: #ffffff;
+  color: #000000;
+  font-family: var(--font-rethink-sans);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+.font-geist {
+  font-family: var(--font-geist);
+}

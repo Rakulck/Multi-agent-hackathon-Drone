@@ -1,0 +1,328 @@
+export type ConnectionName =
+  | "Maps"
+  | "Airtable"
+  | "Slack"
+  | "Twilio"
+  | "Weather"
+  | "Gemini";
+
+export type ConnectionStatus = "placeholder" | "connected" | "warning" | "error";
+
+export type DroneStatus = "Available" | "Charging" | "In Mission" | "Maintenance";
+
+export type VisualVariant = "loading" | "empty" | "success" | "warning" | "error";
+
+export type MissionRun = "MISSION_1" | "MISSION_2";
+
+export type MissionState =
+  | "READY"
+  | "ANALYZING ORDER"
+  | "SELECTING DRONE"
+  | "CHECKING CONDITIONS"
+  | "IN FLIGHT"
+  | "OBSTACLE DETECTED"
+  | "MEMORY SAVED"
+  | "REROUTING"
+  | "DELIVERED";
+
+export type RouteId = "A" | "B" | "C";
+
+export type RouteStatus = "candidate" | "selected" | "warning" | "blocked";
+
+export interface ConnectionIndicator {
+  name: ConnectionName;
+  status: ConnectionStatus;
+}
+
+export interface Kpi {
+  label: string;
+  value: string;
+  detail: string;
+  variant: VisualVariant;
+}
+
+export interface FleetDrone {
+  id: string;
+  model: string;
+  vendor: string;
+  payloadKg: number;
+  rangeKm: number;
+  batteryPercent: number;
+  status: DroneStatus;
+  windLimitMph: number;
+}
+
+export interface RouteLegendItem {
+  id: RouteId;
+  name: "Route A" | "Route B" | "Route C";
+  label: string;
+  status: RouteStatus;
+}
+
+export interface TimelineEvent {
+  id?: string;
+  time: string;
+  title: string;
+  detail: string;
+  variant: VisualVariant;
+}
+
+export interface MissionIntelligence {
+  order: string;
+  guardrails: string[];
+  selectedDrone: string;
+  selectedRoute: string;
+  memoryConsulted: string;
+  currentStatus: MissionState;
+}
+
+export interface MemoryPlaceholder {
+  id: string;
+  title: string;
+  severity: "Low" | "Medium" | "High";
+  confidence: string;
+  expires: string;
+  detail: string;
+}
+
+export interface GeoPoint3D {
+  lat: number;
+  lng: number;
+  altitude: number;
+}
+
+export interface DemoRoute {
+  id: RouteId;
+  name: RouteLegendItem["name"];
+  label: string;
+  waypoints: GeoPoint3D[];
+}
+
+export interface HazardZone {
+  id: string;
+  label: string;
+  center: GeoPoint3D;
+  polygon: GeoPoint3D[];
+}
+
+export interface OperationalMemory {
+  id: string;
+  learnedBy: string;
+  usedBy?: string;
+  routeId: RouteId;
+  hazardType: string;
+  severity: "Low" | "Medium" | "High";
+  confidence: number;
+  createdAt: string;
+  expiresAt: string;
+  summary: string;
+  altitudeBandM: [number, number];
+  avoidanceRadiusM: number;
+  airtableStatus: "saving" | "saved";
+}
+
+/** Top-level product surfaces. */
+export type TopTab = "planning" | "live";
+
+/** High-level flight modes surfaced on the Live Mission tab. */
+export type FlightMode =
+  | "TAKEOFF"
+  | "CRUISE"
+  | "HOLD"
+  | "EVALUATING"
+  | "REROUTING"
+  | "APPROACH"
+  | "DROP-OFF"
+  | "RETURNING"
+  | "DELIVERED";
+
+export type ConnectionHealth = "Nominal" | "Degraded";
+
+export type ApprovalCategory =
+  | "Low-confidence obstacle"
+  | "All routes blocked"
+  | "Borderline weather"
+  | "Uncertain battery reserve"
+  | "Blocked drop-off zone"
+  | "Missing safety data";
+
+export interface ApprovalRequest {
+  category: ApprovalCategory;
+  reason: string;
+  recommendedAction: string;
+}
+
+export type ApprovalDecision = "approve-reroute" | "return-home" | "cancel-mission";
+
+export interface DropOffZone {
+  id: string;
+  label: string;
+  point: GeoPoint3D;
+}
+
+/** External applications surfaced in the Live Mission "Integration Flow" panel. */
+export type IntegrationApp =
+  | "OpenWeather"
+  | "Agent"
+  | "Gemini"
+  | "Airtable"
+  | "Google Maps 3D"
+  | "Slack"
+  | "Operator";
+
+export type IntegrationStatus = "Waiting" | "Processing" | "Completed" | "Failed";
+
+export interface IntegrationEvent {
+  id: string;
+  app: IntegrationApp;
+  result: string;
+  status: IntegrationStatus;
+  timestamp: string;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Multi-mission preflight model                                              */
+/* -------------------------------------------------------------------------- */
+
+export type DeliveryType = "Grocery" | "Medical" | "Small Logistics";
+
+export type MissionPriority = "Standard" | "Express" | "Critical";
+
+export type DropOffPreference = "Primary entrance" | "Rooftop" | "Courtyard";
+
+/** A geocoded real-world address resolved via the Google Maps Geocoding API. */
+export interface GeoAddress {
+  label: string;
+  lat: number;
+  lng: number;
+}
+
+export interface NewMissionInput {
+  deliveryType: DeliveryType;
+  weightKg: number;
+  pickup: string;
+  drop: string;
+  priority: MissionPriority;
+  dropOffPreference: DropOffPreference;
+  /** Set once the `pickup` text has been geocoded to a real coordinate. */
+  pickupPlace?: GeoAddress;
+  /** Set once the `drop` text has been geocoded to a real coordinate. */
+  dropPlace?: GeoAddress;
+}
+
+/**
+ * The full set of geographic entities the 3D map renders for one mission —
+ * origin/destination, the three route corridors, the hazard geofence, and
+ * the drop-off zones. When a mission supplies real geocoded pickup/drop
+ * addresses this is generated by warping the tuned demo geometry onto the
+ * new origin/destination pair; otherwise it's the original fixed demo scene.
+ */
+export interface MissionMapScene {
+  origin: GeoPoint3D;
+  destination: GeoPoint3D;
+  originLabel: string;
+  destinationLabel: string;
+  routes: DemoRoute[];
+  hazard: HazardZone;
+  secondObstacle: GeoPoint3D;
+  dropOffZone: DropOffZone;
+  alternateDropOffA: GeoPoint3D;
+  alternateDropOffB: GeoPoint3D;
+  isCustomAddress: boolean;
+}
+
+export type MissionLifecycle =
+  | "NEW"
+  | "PREFLIGHT"
+  | "HOLD"
+  | "READY"
+  | "LAUNCHED"
+  | "IN_FLIGHT"
+  | "DELIVERED";
+
+export const preflightStepOrder = [
+  "REQUEST",
+  "FLEET",
+  "WEATHER",
+  "MEMORY",
+  "ROUTES",
+  "APPROVAL",
+  "READY",
+] as const;
+
+export type PreflightStepId = (typeof preflightStepOrder)[number];
+
+export type StepStatus = "Waiting" | "Evaluating" | "Completed" | "Warning" | "Failed";
+
+export interface StepEvidence {
+  id: PreflightStepId;
+  title: string;
+  input: string[];
+  evaluation: string[];
+  decision: string;
+  source: string[];
+  status: StepStatus;
+  summary: string;
+}
+
+export interface FleetEvalRow {
+  drone: FleetDrone;
+  eligible: boolean;
+  reason: string;
+}
+
+export interface RouteEvalRow {
+  id: RouteId;
+  name: string;
+  distanceKm: number;
+  etaMin: number;
+  weatherExposure: string;
+  memoryConflict: string;
+  status: RouteStatus;
+  reason: string;
+}
+
+export interface WeatherSnapshotData {
+  windMph: number;
+  gustMph: number;
+  visibilityMiles: number;
+  temperatureF: number;
+  updatedAt: string;
+}
+
+export interface ApprovedPlan {
+  version: 1 | 2;
+  droneModel: string;
+  routeId: RouteId;
+  speedMph: number;
+  altitudeCorridor: string;
+  batteryReserve: string;
+  primaryDropOff: string;
+  backupDropOff: string;
+  memoriesUsed: string[];
+  weatherTimestamp: string;
+  approvalStatus: string;
+}
+
+export interface Mission {
+  id: string;
+  label: string;
+  createdAt: string;
+  input: NewMissionInput;
+  lifecycle: MissionLifecycle;
+  pattern: MissionRun;
+  steps: Record<PreflightStepId, StepEvidence>;
+  activeStepId: PreflightStepId | null;
+  fleetEligibility: FleetEvalRow[] | null;
+  provisionalDrone: string | null;
+  confirmedDrone: string | null;
+  cruiseSpeedMph: number | null;
+  etaDeltaMin: number;
+  routeEval: RouteEvalRow[] | null;
+  selectedRoute: RouteId | null;
+  approvalRequired: boolean;
+  plan: ApprovedPlan | null;
+  mapScene: MissionMapScene;
+}
+
+export type ConnectionState = "online" | "offline";
