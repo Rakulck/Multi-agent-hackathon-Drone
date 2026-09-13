@@ -32,9 +32,12 @@ const routeColors: Record<RouteId, { base: string; completed: string; remaining:
   B: { base: "#f59e0b", completed: "#92400e", remaining: "#fbbf24" },
   C: { base: "#16a34a", completed: "#166534", remaining: "#4ade80" },
 };
+const selectedRouteColors = { base: "#16a34a", completed: "#166534", remaining: "#4ade80" };
 
 function routeStrokeColor(id: RouteId, status: RouteStatus): string {
-  return status === "blocked" ? "#ef4444" : routeColors[id].base;
+  if (status === "blocked") return "#ef4444";
+  if (status === "selected") return selectedRouteColors.base;
+  return routeColors[id].base;
 }
 
 interface ElementRegistry {
@@ -548,7 +551,9 @@ export const GoogleMaps3DView = forwardRef<DroneMapHandle, GoogleMaps3DViewProps
       if (remaining) remaining.style.display = showProgress ? "block" : "none";
       if (showProgress && route && completed && remaining) {
         const split = splitRouteAtProgress(route.waypoints, routeProgress);
+        completed.strokeColor = selectedRouteColors.completed;
         completed.coordinates = split.completed;
+        remaining.strokeColor = selectedRouteColors.remaining;
         remaining.coordinates = split.remaining;
       }
     });

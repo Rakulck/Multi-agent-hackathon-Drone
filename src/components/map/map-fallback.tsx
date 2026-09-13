@@ -14,9 +14,12 @@ const routeColors: Record<RouteId, { base: string; completed: string; remaining:
   B: { base: "#f59e0b", completed: "#92400e", remaining: "#fbbf24" },
   C: { base: "#16a34a", completed: "#166534", remaining: "#4ade80" },
 };
+const selectedRouteColors = { base: "#16a34a", completed: "#166534", remaining: "#4ade80" };
 
 function routeStrokeColor(id: RouteId, status: RouteStatus): string {
-  return status === "blocked" ? "#ef4444" : routeColors[id].base;
+  if (status === "blocked") return "#ef4444";
+  if (status === "selected") return selectedRouteColors.base;
+  return routeColors[id].base;
 }
 
 interface MapFallbackProps extends MapMissionAnimationContext {
@@ -136,14 +139,14 @@ export function MapFallback({
           <>
             <path
               d={remainingPath}
-              stroke={routeColors[activeRoute.id].remaining}
+              stroke={selectedRouteColors.remaining}
               strokeWidth="9"
               fill="none"
               strokeDasharray="14 9"
             >
               {!reducedMotion ? <animate attributeName="stroke-dashoffset" from="23" to="0" dur="1.4s" repeatCount="indefinite" /> : null}
             </path>
-            <path d={completedPath} stroke={routeColors[activeRoute.id].completed} strokeWidth="9" fill="none" />
+            <path d={completedPath} stroke={selectedRouteColors.completed} strokeWidth="9" fill="none" />
           </>
         ) : null}
         {connectorPath ? <path d={connectorPath} stroke="#22c55e" strokeWidth="7" fill="none" strokeDasharray="8 6" /> : null}

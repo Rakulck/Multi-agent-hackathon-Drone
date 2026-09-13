@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertCircle, Check, Loader2 } from "lucide-react";
+import { AlertCircle, Check, Loader2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type {
   CustomerCommunicationTransport,
@@ -54,6 +54,11 @@ function TwilioToastCard({
   const [exiting, setExiting] = useState(false);
   const isFallback = toast.transport === "DEMO_FALLBACK";
 
+  function dismiss() {
+    setExiting(true);
+    window.setTimeout(() => onDismiss(toast.id), 280);
+  }
+
   useEffect(() => {
     if (toast.status === "sending") return;
     const visibleForMs =
@@ -72,7 +77,7 @@ function TwilioToastCard({
   return (
     <div
       className={cn(
-        "twilio-toast-enter rounded-[20px] border bg-white p-4 shadow-[0_22px_60px_rgba(0,0,0,0.22)] transition-all duration-300 ease-out",
+        "pointer-events-auto twilio-toast-enter rounded-[20px] border bg-white p-4 shadow-[0_22px_60px_rgba(0,0,0,0.22)] transition-all duration-300 ease-out",
         isFallback ? "border-amber-300" : "border-neutral-200",
         exiting && "translate-x-4 scale-[0.98] opacity-0",
       )}
@@ -92,9 +97,19 @@ function TwilioToastCard({
                 {isFallback ? "TWILIO DEMO · SIMULATED SMS" : "Twilio"}
               </p>
             </div>
-            <span className="shrink-0 text-[10px] font-semibold text-neutral-400">
-              {toast.recipientMasked}
-            </span>
+            <div className="flex shrink-0 items-center gap-2">
+              <span className="text-[10px] font-semibold text-neutral-400">
+                {toast.recipientMasked}
+              </span>
+              <button
+                type="button"
+                aria-label="Dismiss Twilio update"
+                className="-mr-1 -mt-1 grid h-7 w-7 place-items-center rounded-full text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#e31c5f]"
+                onClick={dismiss}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
           </div>
 
           <p className="mt-2 text-[12px] font-medium leading-relaxed text-neutral-700">

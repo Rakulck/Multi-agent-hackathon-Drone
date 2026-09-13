@@ -4,19 +4,12 @@ import { makeRouteLegend } from "@/data/demo-routes";
 import {
   connectionHealthForFlightMode,
   deriveFlightMode,
-  isMemoryActive,
   speedForFlightMode,
   waypointLabel as computeWaypointLabel,
 } from "@/lib/mission-machine";
 import { MapShell } from "@/components/map/map-shell";
 import { LiveDroneState } from "@/components/live-mission/live-drone-state";
-import { AgentDecisionPanel } from "@/components/live-mission/agent-decision-panel";
-import { IntegrationFlowPanel } from "@/components/live-mission/integration-flow-panel";
-import { MemoryCapturePanel } from "@/components/live-mission/memory-capture-panel";
-import { HumanInLoopPanel } from "@/components/live-mission/human-in-loop-panel";
-import { ConnectionStatusPanel } from "@/components/live-mission/connection-status-panel";
-import { DroneVisionPanel } from "@/components/live-mission/drone-vision-panel";
-import { CustomerCommunicationPanel } from "@/components/live-mission/customer-communication-panel";
+import { MissionActivityLog } from "@/components/live-mission/mission-activity-log";
 import { cn } from "@/lib/utils";
 import type {
   AirspaceEval,
@@ -35,7 +28,6 @@ import type {
   OperationalMemory,
   RouteId,
   RouteStatus,
-  StepStatus,
   WeatherEvaluation,
   WeatherSnapshotData,
   VisionAnalysisPhase,
@@ -87,13 +79,10 @@ export function LiveMissionTab({
   flightModeOverride,
   hazardVisible,
   integrationEvents,
-  isRunning,
   liveBattery,
   mapScene,
   memory,
   onResolveApproval,
-  onSimulateApproval,
-  onToggleConnection,
   routeProgress,
   routeStatuses,
   plannedSpeedMph,
@@ -102,7 +91,6 @@ export function LiveMissionTab({
   weather,
   weatherEvaluation,
   visionAnalysis,
-  visionPhase,
 }: LiveMissionTabProps) {
   const flightMode = deriveFlightMode({ status: currentStatus, progress: routeProgress, override: flightModeOverride });
   const plannedSpeedKmh = plannedSpeedMph ? Math.round(plannedSpeedMph * 1.60934) : null;
@@ -113,17 +101,7 @@ export function LiveMissionTab({
   const activeDrone = fleet.find((drone) => drone.model === selectedDrone);
   const batteryPercent = liveBattery ?? activeDrone?.batteryPercent ?? 0;
   const decision = getLiveDecisionParts(currentStatus, activeMission, memory, approval, flightMode, commandLog[0] ?? null, visionAnalysis);
-  const decisionStatus: StepStatus = approval
-    ? "Approval"
-    : currentStatus === "OBSTACLE DETECTED"
-      ? "Warning"
-      : currentStatus === "DELIVERED"
-        ? "Completed"
-        : currentStatus === "ABORTED"
-          ? "Failed"
-        : "Evaluating";
   const reroutingBanner = currentStatus === "REROUTING" ? "Rerouting Route A → Route C" : null;
-  const showMemory = isMemoryActive(memory) || Boolean(memory && hazardVisible);
   const airspaceVisible = Boolean(airspaceEval);
 
   return (
@@ -208,31 +186,14 @@ export function LiveMissionTab({
           waypointLabel={waypoint}
         />
 
-        {activeMission === "MISSION_1" ? (
-          <DroneVisionPanel analysis={visionAnalysis} phase={visionPhase} />
-        ) : null}
-
-        <AgentDecisionPanel
-          decision={decision.decision}
-          evaluation={decision.evaluation}
-          input={decision.input}
-          source={decision.source}
-          status={decisionStatus}
-        />
-
-        <CustomerCommunicationPanel communication={customerCommunication} />
-
-        <IntegrationFlowPanel events={integrationEvents} />
-
-        {showMemory && memory ? <MemoryCapturePanel hazardCenter={mapScene.hazard.center} memory={memory} /> : null}
-
-        <ConnectionStatusPanel connectionState={connectionState} onToggleConnection={onToggleConnection} />
-
-        <HumanInLoopPanel
+        <MissionActivityLog
           approval={approval}
-          isRunning={isRunning}
+          communication={customerCommunication}
+          connectionState={connectionState}
+          currentDecision={decision.decision}
+          events={integrationEvents}
+          memory={memory}
           onResolveApproval={onResolveApproval}
-          onSimulateApproval={onSimulateApproval}
         />
       </aside>
     </section>

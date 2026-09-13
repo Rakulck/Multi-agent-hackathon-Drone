@@ -1,13 +1,12 @@
 "use client";
 
-import { Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Mission, MissionLifecycle } from "@/types/domain";
 
 interface MissionListPanelProps {
+  disablePresetCreation?: boolean;
   missions: Mission[];
   onCreatePreset: (pattern: Mission["pattern"]) => void;
-  onNewMission: () => void;
   onSelectMission: (id: string) => void;
   selectedMissionId: string | null;
 }
@@ -24,25 +23,23 @@ const lifecycleClasses: Record<MissionLifecycle, string> = {
   ABORTED: "bg-red-100 text-red-700",
 };
 
-export function MissionListPanel({ missions, onCreatePreset, onNewMission, onSelectMission, selectedMissionId }: MissionListPanelProps) {
+export function MissionListPanel({
+  disablePresetCreation = false,
+  missions,
+  onCreatePreset,
+  onSelectMission,
+  selectedMissionId,
+}: MissionListPanelProps) {
   return (
-    <aside className="flex h-full min-h-0 w-full flex-col gap-3 rounded-[28px] border border-neutral-200 bg-white p-4 shadow-[0_18px_60px_rgba(0,0,0,0.08)]">
-      <button
-        type="button"
-        onClick={onNewMission}
-        className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-2xl border border-black bg-black text-sm font-bold uppercase tracking-[0.08em] text-white transition hover:bg-neutral-800"
-      >
-        <Plus className="h-4 w-4" />
-        New Mission
-      </button>
+    <aside className="flex h-auto max-h-56 min-h-0 w-full flex-col gap-2 rounded-2xl border border-neutral-200 bg-white p-3 lg:h-full lg:max-h-none">
       <div className="grid grid-cols-2 gap-2">
-        <PresetButton onClick={() => onCreatePreset("MISSION_1")}>Mission 1</PresetButton>
-        <PresetButton onClick={() => onCreatePreset("MISSION_2")}>Mission 2</PresetButton>
+        <PresetButton disabled={disablePresetCreation} onClick={() => onCreatePreset("MISSION_1")}>Order 1</PresetButton>
+        <PresetButton disabled={disablePresetCreation} onClick={() => onCreatePreset("MISSION_2")}>Order 2</PresetButton>
       </div>
 
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
         {missions.length === 0 ? (
-          <p className="mt-4 text-center text-xs font-medium text-neutral-400">No missions yet. Create one to begin.</p>
+          <p className="px-2 py-4 text-center text-xs font-medium text-neutral-400">No missions yet</p>
         ) : (
           missions.map((mission) => {
             const isSelected = mission.id === selectedMissionId;
@@ -52,7 +49,7 @@ export function MissionListPanel({ missions, onCreatePreset, onNewMission, onSel
                 type="button"
                 onClick={() => onSelectMission(mission.id)}
                 className={cn(
-                  "block w-full rounded-2xl border p-3 text-left transition",
+                  "block w-full rounded-xl border p-3 text-left transition",
                   isSelected ? "border-black bg-neutral-50" : "border-neutral-200 bg-white hover:border-neutral-300",
                 )}
               >
@@ -82,14 +79,26 @@ export function MissionListPanel({ missions, onCreatePreset, onNewMission, onSel
   );
 }
 
-function PresetButton({ children, onClick }: { children: string; onClick: () => void }) {
+function PresetButton({
+  children,
+  disabled,
+  onClick,
+}: {
+  children: string;
+  disabled: boolean;
+  onClick: () => void;
+}) {
   return (
     <button
       type="button"
+      disabled={disabled}
       onClick={onClick}
-      className="rounded-2xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.08em] text-neutral-700 transition hover:border-black hover:bg-white hover:text-black"
+      className={cn(
+        "rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-[10px] font-bold text-neutral-700 transition hover:border-black hover:bg-white hover:text-black",
+        disabled && "cursor-not-allowed opacity-50 hover:border-neutral-200 hover:bg-neutral-50 hover:text-neutral-700",
+      )}
     >
-      {children} Preset
+      {children}
     </button>
   );
 }

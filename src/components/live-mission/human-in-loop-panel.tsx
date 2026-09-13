@@ -19,13 +19,11 @@ export function HumanInLoopPanel({
 }: HumanInLoopPanelProps) {
   if (!approval) {
     return (
-      <div className="shrink-0 rounded-[22px] border border-neutral-200 bg-white p-3 shadow-[0_10px_28px_rgba(0,0,0,0.05)]">
+      <div className="shrink-0 rounded-2xl border border-neutral-200 bg-white p-3">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <ShieldCheck className="h-4 w-4 text-emerald-600" />
-            <p className="text-xs font-semibold text-neutral-700">
-              Autonomous — deterministic decisions require no approval
-            </p>
+            <p className="text-xs font-semibold text-neutral-700">No approval needed</p>
           </div>
           <button
             type="button"
@@ -46,28 +44,25 @@ export function HumanInLoopPanel({
   }
 
   return (
-    <div className="shrink-0 rounded-[22px] border border-amber-300 bg-amber-50 p-3 shadow-[0_10px_28px_rgba(0,0,0,0.05)]">
-      <div className="flex items-center gap-2">
-        <AlertTriangle className="h-4 w-4 text-amber-700" />
-        <p className="text-xs font-bold uppercase tracking-[0.1em] text-amber-800">Human approval required</p>
+    <div className="shrink-0 rounded-2xl border border-amber-300 bg-amber-50 p-4">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <AlertTriangle className="h-4 w-4 text-amber-700" />
+          <p className="text-xs font-bold text-amber-900">Slack approval</p>
+        </div>
+        <p className="text-[10px] font-bold uppercase tracking-[0.08em] text-amber-700">
+          {approvalStatusLabel(approval)}
+        </p>
       </div>
-      <p className="mt-1.5 text-[11px] font-semibold text-amber-900">{approval.category}</p>
-      <p className="mt-1 text-[11px] leading-snug text-amber-800">{approval.reason}</p>
-      <p className="mt-1 text-[11px] font-semibold leading-snug text-black">
-        Recommended: {approval.recommendedAction}
+      <p className="mt-2 text-sm leading-snug text-amber-950">
+        <span className="font-bold">Why:</span> {approval.reason}
       </p>
-      <p className="mt-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-amber-700">
-        {approvalStatusLabel(approval)}
+      <p className="mt-1 text-sm leading-snug text-black">
+        <span className="font-bold">Recommended:</span> {approval.recommendedAction}
       </p>
-      {approval.statusMessage ? (
-        <p className="mt-1 text-[10px] leading-snug text-amber-800">{approval.statusMessage}</p>
-      ) : null}
       {approval.transport === "DEMO_FALLBACK" && isActionable(approval) ? (
         <>
-          <p className="mt-2 rounded-lg border border-dashed border-amber-500 bg-white px-2 py-1.5 text-center text-[9px] font-black uppercase tracking-[0.12em] text-amber-800">
-            DEMO_FALLBACK controls · not Slack actions
-          </p>
-          <div className="mt-1.5 grid grid-cols-3 gap-1.5">
+          <div className="mt-3 grid grid-cols-3 gap-1.5">
             <ApprovalButton onClick={() => onResolveApproval("approve")}>
               {approval.approvalKind === "LIVE_OBSTACLE_REROUTE" ? "Adjust Altitude" : "Approve Adjustment"}
             </ApprovalButton>

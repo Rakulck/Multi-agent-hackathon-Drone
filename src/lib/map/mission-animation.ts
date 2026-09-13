@@ -253,8 +253,8 @@ export function deriveMissionVisualState(input: MissionVisualStateInput): Missio
 
   if (missionTwoMemory) {
     displayStatuses.A = "blocked";
-    displayStatuses.B = "warning";
-    displayStatuses.C = "selected";
+    displayStatuses.B = "selected";
+    displayStatuses.C = "blocked";
   } else if (craneDetected) {
     displayStatuses.A = "blocked";
     displayStatuses.B = "warning";
@@ -263,7 +263,7 @@ export function deriveMissionVisualState(input: MissionVisualStateInput): Missio
 
   const currentRoute =
     input.missionRun === "MISSION_2" && missionTwoMemory
-      ? "C"
+      ? "B"
       : input.missionRun === "MISSION_1" &&
           input.selectedRoute === "C" &&
           !approvedReroute
@@ -278,7 +278,7 @@ export function deriveMissionVisualState(input: MissionVisualStateInput): Missio
       hazardVerified,
       memoryLabel: "VERIFIED · ACTIVE",
       routeCRecommended: false,
-      sourceLabel: "Airtable Memory → Deterministic Route Rejection → Autonomous Route C",
+      sourceLabel: "Airtable Memory → Deterministic Route Rejection → Autonomous Route B",
     };
   }
 

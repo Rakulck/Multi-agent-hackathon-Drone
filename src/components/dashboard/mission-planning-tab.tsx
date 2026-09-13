@@ -1,6 +1,6 @@
 "use client";
 
-import { Play, RotateCcw } from "lucide-react";
+import { Loader2, Play, RotateCcw, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { preflightStepOrder } from "@/types/domain";
 import { MissionListPanel } from "@/components/dashboard/mission-list-panel";
@@ -8,7 +8,7 @@ import { PreflightStepper } from "@/components/dashboard/preflight-stepper";
 import { StepEvidenceCard } from "@/components/dashboard/step-evidence-card";
 import { ApprovedPlanCard } from "@/components/dashboard/approved-plan-card";
 import { HumanInLoopPanel } from "@/components/live-mission/human-in-loop-panel";
-import type { MemoryMode, Mission, PreflightStepId, StepStatus, WeatherMode } from "@/types/domain";
+import type { Mission, WeatherMode } from "@/types/domain";
 import type { ApprovalDecision, ApprovalRequest } from "@/types/domain";
 
 interface MissionPlanningTabProps {
@@ -18,9 +18,7 @@ interface MissionPlanningTabProps {
   missions: Mission[];
   onCreatePreset: (pattern: Mission["pattern"]) => void;
   onLaunchMission: () => void;
-  onMemoryModeChange: (mode: MemoryMode) => void;
   onResolveApproval: (decision: ApprovalDecision) => void;
-  onNewMission: () => void;
   onNextStep: () => void;
   onReset: () => void;
   onRunPreflight: () => void;
@@ -36,9 +34,7 @@ export function MissionPlanningTab({
   missions,
   onCreatePreset,
   onLaunchMission,
-  onMemoryModeChange,
   onResolveApproval,
-  onNewMission,
   onNextStep,
   onReset,
   onRunPreflight,
@@ -46,16 +42,12 @@ export function MissionPlanningTab({
   onWeatherModeChange,
   selectedMission,
 }: MissionPlanningTabProps) {
-  const summary = buildSummaryItems(selectedMission);
-  const stepStatuses: Record<PreflightStepId, StepStatus> = Object.fromEntries(
-    preflightStepOrder.map((id) => [id, selectedMission?.steps[id].status ?? "Waiting"]),
-  ) as Record<PreflightStepId, StepStatus>;
   const activeStep = selectedMission?.activeStepId ? selectedMission.steps[selectedMission.activeStepId] : null;
+  const isAutomatedPreset = Boolean(selectedMission?.isDemoPreset);
   const isWeatherSelection =
     activeStep?.id === "WEATHER" && activeStep.status === "Waiting";
   const weatherSelectionReady =
     isWeatherSelection &&
-    activeStep.input.length > 0 &&
     (selectedMission?.weatherMode === "SAFE" ||
       (selectedMission?.weatherMode === "MODERATE" &&
         selectedMission.weatherApprovalGranted) ||
@@ -81,85 +73,99 @@ export function MissionPlanningTab({
     activeStep?.status !== "Evaluating";
   const canChangeWeatherMode =
     Boolean(selectedMission) && selectedMission?.steps.WEATHER.status === "Waiting" && !isRunningPreflight;
-  const canChangeMemoryMode =
-    Boolean(selectedMission) && selectedMission?.steps.MEMORY.status === "Waiting" && !isRunningPreflight;
 
   return (
-    <section className="grid min-h-0 flex-1 grid-cols-[22%_78%] gap-3">
+    <section className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[240px_minmax(0,1fr)]">
       <MissionListPanel
+        disablePresetCreation={isRunningPreflight}
         missions={missions}
         onCreatePreset={onCreatePreset}
-        onNewMission={onNewMission}
         onSelectMission={onSelectMission}
         selectedMissionId={selectedMission?.id ?? null}
       />
 
       <div className="flex min-h-0 flex-col gap-3">
-        <SummaryRow items={summary} />
-
-        <div className="flex shrink-0 items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <MemoryModeControl
-              disabled={!canChangeMemoryMode}
-              mode={selectedMission?.memoryMode ?? "AIRTABLE"}
-              onChange={onMemoryModeChange}
-            />
-          </div>
-          <button
-            type="button"
-            disabled={!canRunPreflight}
-            onClick={onRunPreflight}
-            className={cn(
-              "inline-flex h-14 shrink-0 items-center justify-center gap-2 rounded-2xl border px-4 text-xs font-bold uppercase tracking-[0.08em] transition",
-              !canRunPreflight
-                ? "cursor-not-allowed border-neutral-200 bg-neutral-100 text-neutral-400"
-                : "border-black bg-black text-white hover:bg-neutral-800",
-            )}
-          >
-            <Play className="h-3.5 w-3.5" />
-            Run Preflight
-          </button>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {isAutomatedPreset ? (
+            <div className="ml-auto inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 text-xs font-bold text-blue-700">
+              {isRunningPreflight ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Zap className="h-3.5 w-3.5" />
+              )}
+              {selectedMission?.lifecycle === "HOLD"
+                ? "Paused for operator review"
+                : isRunningPreflight
+                  ? "Running automatic preflight"
+                  : selectedMission?.lifecycle === "READY"
+                    ? "Automatic preflight complete"
+                    : "Automatic preflight enabled"}
+            </div>
+          ) : (
+            <button
+              type="button"
+              disabled={!canRunPreflight}
+              onClick={onRunPreflight}
+              className={cn(
+                "ml-auto inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl border px-3 text-xs font-bold transition",
+                !canRunPreflight
+                  ? "cursor-not-allowed border-neutral-200 bg-neutral-100 text-neutral-400"
+                  : "border-black bg-black text-white hover:bg-neutral-800",
+              )}
+            >
+              <Play className="h-3.5 w-3.5" />
+              Run Preflight
+            </button>
+          )}
           <button
             type="button"
             onClick={onReset}
-            className="inline-flex h-14 shrink-0 items-center justify-center gap-1.5 rounded-2xl border border-neutral-300 bg-white px-3 text-xs font-bold text-black transition hover:border-black"
+            title="Reset"
+            aria-label="Reset"
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-neutral-200 bg-white text-neutral-600 transition hover:border-black hover:text-black"
           >
             <RotateCcw className="h-3.5 w-3.5" />
-            Reset
           </button>
         </div>
 
-        <PreflightStepper statuses={stepStatuses} />
+        {selectedMission ? (
+          <PreflightStepper
+            activeStepId={selectedMission.activeStepId}
+            steps={selectedMission.steps}
+          />
+        ) : null}
 
-        <div className="flex min-h-0 flex-1 flex-col gap-2.5">
-          {!selectedMission ? (
-            <EmptyState />
-          ) : activeStep ? (
-            <StepEvidenceCard
-              canAdvance={canAdvanceStep}
-              controls={
-                activeStep.id === "WEATHER" ? (
-                  <WeatherModeControl
-                    disabled={!canChangeWeatherMode}
-                    mode={selectedMission.weatherMode}
-                    onChange={onWeatherModeChange}
-                  />
-                ) : undefined
-              }
-              isAdvancing={isRunningPreflight}
-              onNext={onNextStep}
-              showAdvance={isWeatherSelection}
-              step={activeStep}
-            />
-          ) : (
-            <EmptyState message="Run Preflight to begin the sequential evaluation." />
-          )}
-
-        </div>
+        {!isAutomatedPreset ? (
+          <div className="flex min-h-0 flex-1 flex-col gap-2.5">
+            {!selectedMission ? (
+              <EmptyState />
+            ) : activeStep ? (
+              <StepEvidenceCard
+                canAdvance={canAdvanceStep}
+                controls={
+                  activeStep.id === "WEATHER" ? (
+                    <WeatherModeControl
+                      disabled={!canChangeWeatherMode}
+                      mode={selectedMission.weatherMode}
+                      onChange={onWeatherModeChange}
+                    />
+                  ) : undefined
+                }
+                isAdvancing={isRunningPreflight}
+                onNext={onNextStep}
+                showAdvance={isWeatherSelection}
+                step={activeStep}
+              />
+            ) : (
+              <EmptyState message="Run Preflight to begin the sequential evaluation." />
+            )}
+          </div>
+        ) : null}
 
         <ApprovedPlanCard
           canLaunch={Boolean(canLaunch)}
           isRunning={isLaunching}
+          mission={selectedMission}
           onLaunch={onLaunchMission}
           plan={selectedMission?.plan ?? null}
         />
@@ -173,37 +179,6 @@ export function MissionPlanningTab({
         ) : null}
       </div>
     </section>
-  );
-}
-
-function MemoryModeControl({
-  disabled,
-  mode,
-  onChange,
-}: {
-  disabled: boolean;
-  mode: MemoryMode;
-  onChange: (mode: MemoryMode) => void;
-}) {
-  return (
-    <div className="flex items-center gap-1 rounded-2xl border border-neutral-200 bg-white p-1.5">
-      <span className="pl-1.5 text-[10px] font-bold uppercase tracking-[0.12em] text-neutral-500">Memory</span>
-      {(["AIRTABLE", "DEMO_FALLBACK"] as const).map((option) => (
-        <button
-          key={option}
-          type="button"
-          disabled={disabled}
-          onClick={() => onChange(option)}
-          className={cn(
-            "rounded-lg px-2 py-1.5 text-[10px] font-bold uppercase tracking-[0.06em] transition",
-            mode === option ? "bg-black text-white" : "bg-neutral-100 text-neutral-500 hover:text-black",
-            disabled && "cursor-not-allowed opacity-50",
-          )}
-        >
-          {option === "AIRTABLE" ? "Airtable" : "Demo"}
-        </button>
-      ))}
-    </div>
   );
 }
 
@@ -223,9 +198,9 @@ function WeatherModeControl({
   onChange: (mode: WeatherMode) => void;
 }) {
   return (
-    <div className="flex items-center gap-2 rounded-2xl border border-neutral-200 bg-white p-1.5">
-      <span className="pl-2 text-[10px] font-bold uppercase tracking-[0.14em] text-neutral-500">Weather</span>
-      <div className="flex items-center gap-1 rounded-xl bg-neutral-100 p-1">
+    <div className="flex items-center gap-2 rounded-xl border border-neutral-200 bg-white p-1">
+      <span className="pl-2 text-[10px] font-bold uppercase tracking-[0.12em] text-neutral-500">Weather</span>
+      <div className="flex items-center gap-1 rounded-lg bg-neutral-100 p-1">
         {weatherModes.map((option) => (
           <button
             key={option.id}
@@ -233,7 +208,7 @@ function WeatherModeControl({
             disabled={disabled}
             onClick={() => onChange(option.id)}
             className={cn(
-              "rounded-lg px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-[0.08em] transition",
+              "rounded-md px-2.5 py-1.5 text-[10px] font-bold transition",
               mode === option.id ? "bg-black text-white shadow-sm" : "text-neutral-500 hover:bg-white hover:text-black",
               disabled && "cursor-not-allowed opacity-50",
             )}
@@ -252,59 +227,4 @@ function EmptyState({ message = "Create a mission to begin preflight." }: { mess
       {message}
     </div>
   );
-}
-
-function SummaryRow({ items }: { items: SummaryItem[] }) {
-  return (
-    <section className="grid h-[72px] shrink-0 grid-cols-4 gap-3">
-      {items.map((item) => (
-        <div key={item.label} className="rounded-[20px] border border-neutral-200 bg-white px-4 py-2.5 shadow-[0_10px_28px_rgba(0,0,0,0.05)]">
-          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-neutral-500">{item.label}</p>
-          <p className="font-geist mt-1 text-xl font-semibold tracking-[-0.04em] text-black">{item.value}</p>
-        </div>
-      ))}
-    </section>
-  );
-}
-
-interface SummaryItem {
-  label: string;
-  value: string;
-}
-
-function buildSummaryItems(mission: Mission | null): SummaryItem[] {
-  if (!mission) {
-    return [
-      { label: "Package Weight", value: "—" },
-      { label: "Eligible Drones", value: "—" },
-      { label: "Weather Risk", value: "—" },
-      { label: "Airspace Auth", value: "—" },
-    ];
-  }
-
-  const fleetStep = mission.steps.FLEET;
-  const weatherStep = mission.steps.WEATHER;
-  const airspaceStep = mission.steps.AIRSPACE;
-
-  const eligibleValue =
-    fleetStep.status === "Waiting" || !mission.fleetEligibility
-      ? "—"
-      : `${mission.fleetEligibility.filter((row) => row.eligible).length}/${mission.fleetEligibility.length}`;
-
-  const weatherValue =
-    weatherStep.status === "Waiting" ? "—" : weatherStep.status === "Warning" ? "Elevated" : weatherStep.status === "Failed" ? "High" : "Low";
-
-  const airspaceValue =
-    airspaceStep.status === "Waiting" || !mission.airspaceEval
-      ? "—"
-      : mission.airspaceEval.authorizationRequired
-        ? "Required"
-        : "Clear";
-
-  return [
-    { label: "Package Weight", value: `${mission.input.weightKg} kg` },
-    { label: "Eligible Drones", value: eligibleValue },
-    { label: "Weather Risk", value: weatherValue },
-    { label: "Airspace Auth", value: airspaceValue },
-  ];
 }

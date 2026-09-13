@@ -172,7 +172,7 @@ export interface MemoryRouteMatch {
 }
 
 /** Top-level product surfaces. */
-export type TopTab = "planning" | "live";
+export type TopTab = "planning" | "airtable" | "live";
 
 /** High-level flight modes surfaced on the Live Mission tab. */
 export type FlightMode =

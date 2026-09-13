@@ -122,7 +122,7 @@ describe("mission route safety presentation", () => {
     expect(state.eventLabel).toBe("Camera event detected");
   });
 
-  it("selects Route C for Mission 2 before movement when memory is verified", () => {
+  it("selects Route B for Mission 2 before movement when memory is verified", () => {
     const state = deriveMissionVisualState({
       hazardVisible: true,
       memory: verifiedMemory,
@@ -132,9 +132,10 @@ describe("mission route safety presentation", () => {
       selectedRoute: "A",
     });
 
-    expect(state.currentRoute).toBe("C");
+    expect(state.currentRoute).toBe("B");
     expect(state.displayStatuses.A).toBe("blocked");
-    expect(state.displayStatuses.C).toBe("selected");
+    expect(state.displayStatuses.B).toBe("selected");
+    expect(state.displayStatuses.C).toBe("blocked");
     expect(state.eventLabel).toBe("Verified memory loaded before takeoff.");
   });
 

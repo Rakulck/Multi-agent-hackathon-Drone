@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
-import { Database, Radio, type LucideIcon } from "lucide-react";
+import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { Radio, type LucideIcon } from "lucide-react";
 import { dispatchOrigin } from "@/data/demo-routes";
 import { makeFallbackWeatherResponse } from "@/data/demo-weather";
 import { MissionPlanningTab } from "@/components/dashboard/mission-planning-tab";
 import { NewMissionModal } from "@/components/dashboard/new-mission-modal";
+import { AirtableMemoryTab } from "@/components/dashboard/airtable-memory-tab";
 import { LiveMissionTab } from "@/components/live-mission/live-mission-tab";
 import {
   TwilioToastViewport,
@@ -66,8 +67,6 @@ import {
   type GeminiObstacleApiResponse,
   type IntegrationEvent,
   type MemoryApiResponse,
-  type MemoryFetchState,
-  type MemoryMode,
   type Mission,
   type MissionMapScene,
   type MissionRiskCondition,
@@ -186,9 +185,9 @@ export function DashboardShell() {
     setCommandLog((current) => [command, ...current].slice(0, 5));
   }
 
-  const dismissTwilioToast = useCallback((id: string) => {
+  function dismissTwilioToast(id: string) {
     setTwilioToasts((current) => current.filter((toast) => toast.id !== id));
-  }, []);
+  }
 
   function beginTwilioToast(
     mission: Mission,
@@ -367,6 +366,40 @@ export function DashboardShell() {
     }
   }
 
+  async function runAutomatedPreflight(initialMission: Mission) {
+    if (isRunningPreflight) {
+      return;
+    }
+
+    setIsRunningPreflight(true);
+    try {
+      let mission = initialMission;
+
+      while (
+        (mission.lifecycle === "NEW" || mission.lifecycle === "PREFLIGHT") &&
+        preflightStepOrder.some((id) => mission.steps[id].status === "Waiting")
+      ) {
+        const nextStepId = preflightStepOrder.find(
+          (id) => mission.steps[id].status === "Waiting",
+        );
+        const nextMission = await runNextPreflightStep(mission);
+
+        if (
+          !nextStepId ||
+          nextMission.steps[nextStepId].status === "Waiting" ||
+          nextMission.lifecycle === "HOLD" ||
+          nextMission.lifecycle === "ABORTED"
+        ) {
+          break;
+        }
+
+        mission = nextMission;
+      }
+    } finally {
+      setIsRunningPreflight(false);
+    }
+  }
+
   function handleRunPreflight() {
     if (!selectedMission) {
       return;
@@ -392,12 +425,26 @@ export function DashboardShell() {
           ...mission.steps,
           WEATHER: {
             ...mission.steps.WEATHER,
-            evaluation: [
-              "Select Live, Safe, or Moderate to preview the weather decision.",
-            ],
-            decision: "Choose a weather mode before continuing.",
-            source: ["OpenWeather", "Mission Agent"],
-            summary: "Waiting for weather mode selection.",
+            input:
+              mission.weatherMode === "SAFE"
+                ? ["Controlled Safe weather selected."]
+                : [],
+            evaluation:
+              mission.weatherMode === "SAFE"
+                ? ["Wind and visibility will remain comfortably within drone limits."]
+                : ["Select Live, Safe, or Moderate to preview the weather decision."],
+            decision:
+              mission.weatherMode === "SAFE"
+                ? "Safe mode is ready. Select Next Step to continue."
+                : "Choose a weather mode before continuing.",
+            source:
+              mission.weatherMode === "SAFE"
+                ? ["Controlled demo weather", "Mission Agent"]
+                : ["OpenWeather", "Mission Agent"],
+            summary:
+              mission.weatherMode === "SAFE"
+                ? "Safe weather ready to evaluate."
+                : "Waiting for weather mode selection.",
           },
         },
       }));
@@ -506,10 +553,10 @@ export function DashboardShell() {
                   "No fallback mode was selected automatically.",
                 ],
                 decision:
-                  "Choose Safe or Moderate to continue the weather step.",
+                  "Live weather is unavailable. A live-weather decision is not possible. Choose Safe or Moderate.",
                 source: ["OpenWeather LIVE", "Mission Agent"],
                 status: "Waiting",
-                summary: "Live weather unavailable · choose Safe or Moderate.",
+                summary: "Live-weather decision not possible · choose Safe or Moderate.",
               },
         },
       }));
@@ -677,18 +724,13 @@ export function DashboardShell() {
     }));
   }
 
-  function handleMemoryModeChange(mode: MemoryMode) {
-    if (!selectedMission || selectedMission.steps.MEMORY.status !== "Waiting" || isRunningPreflight) {
-      return;
-    }
-    updateMission(selectedMission.id, (mission) => ({ ...mission, memoryMode: mode }));
-  }
-
   function handleLaunchMission() {
     if (!selectedMission || selectedMission.lifecycle !== "READY" || isLaunching) {
       return;
     }
-    void launchMission(selectedMission);
+    const launchMissionState = enforceOrderTwoRouteB(selectedMission);
+    updateMission(selectedMission.id, () => launchMissionState);
+    void launchMission(launchMissionState);
   }
 
   function updateLiveTelemetry(mission: Mission, progress: number) {
@@ -713,6 +755,7 @@ export function DashboardShell() {
     setMissions((current) => [...current, mission]);
     setSelectedMissionId(mission.id);
     setShowNewMissionModal(false);
+    void runAutomatedPreflight(mission);
   }
 
   async function runNextPreflightStep(mission: Mission): Promise<Mission> {
@@ -1075,6 +1118,7 @@ export function DashboardShell() {
         break;
       }
       case "READY": {
+        nextMission = enforceOrderTwoRouteB(nextMission);
         const memoryActive = nextMission.pattern === "MISSION_2";
         const plan = buildApprovedPlan({
           version: memoryActive ? 2 : 1,
@@ -1529,7 +1573,7 @@ export function DashboardShell() {
   async function runLiveMission2(mission: Mission, runToken: number) {
     const droneModel = mission.confirmedDrone ?? "CargoSwift S2";
     const routes = mission.mapScene.routes;
-    const flightRoute = mission.selectedRoute ?? "C";
+    const flightRoute: RouteId = mission.selectedRoute ?? "B";
     const launchAltitudeM =
       routes.find((route) => route.id === flightRoute)?.waypoints[1]?.altitude ??
       mission.mapScene.origin.altitude + 20;
@@ -2450,10 +2494,9 @@ export function DashboardShell() {
   }
 
   return (
-    <main className="h-screen overflow-hidden bg-white p-3 text-black">
-      <div className="mx-auto flex h-full max-w-[1440px] flex-col gap-3">
+    <main className="min-h-screen bg-neutral-50 p-3 text-black lg:h-screen lg:overflow-hidden">
+      <div className="mx-auto flex min-h-[calc(100vh-1.5rem)] max-w-[1280px] flex-col gap-3 lg:h-full lg:min-h-0">
         <TopBar
-          airtableState={selectedMission?.memoryFetchState ?? "IDLE"}
           liveEnabled={liveEnabled}
           onNewMission={() => setShowNewMissionModal(true)}
           onTopTabChange={handleTopTabChange}
@@ -2471,8 +2514,6 @@ export function DashboardShell() {
             missions={missions}
             onCreatePreset={handleCreatePreset}
             onLaunchMission={handleLaunchMission}
-            onMemoryModeChange={handleMemoryModeChange}
-            onNewMission={() => setShowNewMissionModal(true)}
             onNextStep={handleNextStep}
             onResolveApproval={resolveApproval}
             onReset={resetDemo}
@@ -2481,6 +2522,9 @@ export function DashboardShell() {
             onWeatherModeChange={handleWeatherModeChange}
             selectedMission={selectedMission}
           />
+        </div>
+        <div className={cn("contents", topTab !== "airtable" && "hidden")}>
+          <AirtableMemoryTab active={topTab === "airtable"} />
         </div>
         <div className={cn("contents", topTab !== "live" && "hidden")}>
           {hasVisitedLive ? (
@@ -2551,6 +2595,39 @@ function estimatedRemainingEtaLabel(mission: Mission, progress: number): string 
 function adjustedAnimationDuration(mission: Mission, baseDurationMs: number): number {
   const plannedSpeed = mission.cruiseSpeedMph ?? BASE_CRUISE_SPEED_MPH;
   return Math.round(baseDurationMs * (BASE_CRUISE_SPEED_MPH / plannedSpeed));
+}
+
+function enforceOrderTwoRouteB(mission: Mission): Mission {
+  if (mission.pattern !== "MISSION_2" || mission.selectedRoute === "B") {
+    return mission;
+  }
+
+  const routeCEligible = mission.airspaceEval?.routeResults.find(
+    (route) => route.id === "C",
+  )?.eligible;
+
+  return {
+    ...mission,
+    selectedRoute: "B",
+    plan: mission.plan ? { ...mission.plan, routeId: "B" } : mission.plan,
+    routeEval: mission.routeEval?.map((route) => ({
+      ...route,
+      status:
+        route.id === "B"
+          ? "selected"
+          : route.id === "A"
+            ? "blocked"
+            : routeCEligible === false
+              ? "blocked"
+              : "candidate",
+      reason:
+        route.id === "B"
+          ? "Selected for Order 2 before launch."
+          : route.id === "A"
+            ? "Blocked for Order 2 by the previously verified crane corridor."
+            : route.reason,
+    })) ?? null,
+  };
 }
 
 function applyApprovedCautionAdjustments(
@@ -3176,14 +3253,12 @@ function isWeatherResponse(value: unknown): value is WeatherResponse {
 }
 
 function TopBar({
-  airtableState,
   liveEnabled,
   onNewMission,
   onTopTabChange,
   slackState,
   topTab,
 }: {
-  airtableState: MemoryFetchState;
   liveEnabled: boolean;
   onNewMission: () => void;
   onTopTabChange: (tab: TopTab) => void;
@@ -3191,50 +3266,32 @@ function TopBar({
   topTab: TopTab;
 }) {
   return (
-    <header className="flex h-16 shrink-0 items-center justify-between rounded-[24px] border border-neutral-200 bg-white px-5 shadow-[0_12px_36px_rgba(0,0,0,0.06)]">
-      <div>
-        <div className="flex items-center gap-3">
-          <h1 className="font-geist text-xl font-semibold tracking-[-0.04em] text-black">Drone Fleet Intelligence</h1>
-          <span className="rounded-full bg-black px-3 py-1 text-[11px] font-bold uppercase tracking-[0.22em] text-white">
-            Simulation
-          </span>
-        </div>
-        <p className="mt-1 text-sm text-neutral-500">Different drones. One shared intelligence layer.</p>
+    <header className="grid min-h-14 shrink-0 grid-cols-[1fr_auto] items-center gap-2 rounded-2xl border border-neutral-200 bg-white px-4 py-2 sm:grid-cols-[auto_1fr_auto]">
+      <div className="col-start-1 row-start-1 flex items-center">
+        <h1 className="font-geist text-lg font-semibold tracking-[-0.04em] text-black">Drone Fleet</h1>
       </div>
 
-      <div className="flex items-center gap-3">
-        <button
-          type="button"
-          onClick={onNewMission}
-          className="rounded-2xl border border-black bg-black px-4 py-2 text-xs font-bold uppercase tracking-[0.1em] text-white transition hover:bg-neutral-800"
-        >
-          New Mission
-        </button>
-        <nav className="flex items-center gap-1 rounded-2xl bg-neutral-100 p-1">
+      <div className="col-span-2 row-start-2 flex items-center gap-2 sm:col-span-1 sm:col-start-2 sm:row-start-1 sm:justify-end">
+        <nav className="flex items-center gap-1 rounded-xl bg-neutral-100 p-1">
           <TopTabButton active={topTab === "planning"} onClick={() => onTopTabChange("planning")}>
-            Mission Planning
+            Plan
+          </TopTabButton>
+          <TopTabButton active={topTab === "airtable"} onClick={() => onTopTabChange("airtable")}>
+            Airtable
           </TopTabButton>
           <TopTabButton active={topTab === "live"} disabled={!liveEnabled} onClick={() => onTopTabChange("live")}>
-            Live Mission
+            Live
           </TopTabButton>
         </nav>
-        <div className="flex items-center gap-2">
-          <ConnectionIndicator
-            icon={Database}
-            label="Airtable"
-            state={
-              airtableState === "SUCCESS" || airtableState === "SUCCESS_EMPTY"
-                ? "success"
-                : airtableState === "LOADING"
-                  ? "loading"
-                  : airtableState === "IDLE"
-                    ? "idle"
-                    : "error"
-            }
-          />
-          <ConnectionIndicator icon={Radio} label="Slack" state={slackState} />
-        </div>
+        <ConnectionIndicator icon={Radio} label="Slack" state={slackState} />
       </div>
+      <button
+        type="button"
+        onClick={onNewMission}
+        className="col-start-2 row-start-1 rounded-xl border border-black bg-black px-3 py-2 text-xs font-bold text-white transition hover:bg-neutral-800 sm:col-start-3"
+      >
+        New mission
+      </button>
     </header>
   );
 }
@@ -3257,7 +3314,7 @@ function TopTabButton({
       onClick={onClick}
       title={disabled ? "Complete preflight to unlock Live Mission" : undefined}
       className={cn(
-        "rounded-xl px-4 py-2 text-xs font-bold uppercase tracking-[0.14em] transition",
+        "rounded-lg px-3 py-1.5 text-xs font-bold transition",
         disabled
           ? "cursor-not-allowed text-neutral-300"
           : active
@@ -3280,7 +3337,7 @@ function ConnectionIndicator({
   state?: "idle" | "loading" | "success" | "error";
 }) {
   return (
-    <span className="inline-flex items-center gap-2 rounded-full border border-neutral-200 bg-neutral-50 px-3 py-1.5 text-xs font-semibold text-black">
+    <span className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-2 py-1.5 text-[11px] font-semibold text-neutral-600">
       <Icon
         className={cn(
           "h-3.5 w-3.5",

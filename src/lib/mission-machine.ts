@@ -328,7 +328,8 @@ export function waypointLabel(routes: DemoRoute[], routeId: RouteId | null, prog
   return `WP ${index} of ${route.waypoints.length} · Route ${routeId}`;
 }
 
-const MAX_INTEGRATION_EVENTS = 8;
+// Keep the complete demo narrative available in the scrollable mission log.
+const MAX_INTEGRATION_EVENTS = 100;
 
 /**
  * Appends a sanitized integration-flow event, marking any previously
@@ -466,7 +467,7 @@ export function createMission(
 
   return {
     id: `mission-${Date.now()}-${missionCounter}`,
-    label: `Mission ${missionCounter}`,
+    label: `Order ${missionCounter}`,
     createdAt: formatClockTime(new Date()),
     input,
     lifecycle: "NEW",
