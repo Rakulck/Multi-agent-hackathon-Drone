@@ -9,6 +9,7 @@ const statusBadgeClasses: Record<StepStatus, string> = {
   Completed: "bg-emerald-100 text-emerald-700",
   Warning: "bg-amber-100 text-amber-700",
   Failed: "bg-red-100 text-red-700",
+  Approval: "bg-violet-100 text-violet-700",
 };
 
 interface AgentDecisionPanelProps {

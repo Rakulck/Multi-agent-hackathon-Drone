@@ -6,6 +6,7 @@ import type { Mission, MissionLifecycle } from "@/types/domain";
 
 interface MissionListPanelProps {
   missions: Mission[];
+  onCreatePreset: (pattern: Mission["pattern"]) => void;
   onNewMission: () => void;
   onSelectMission: (id: string) => void;
   selectedMissionId: string | null;
@@ -21,7 +22,7 @@ const lifecycleClasses: Record<MissionLifecycle, string> = {
   DELIVERED: "bg-emerald-100 text-emerald-700",
 };
 
-export function MissionListPanel({ missions, onNewMission, onSelectMission, selectedMissionId }: MissionListPanelProps) {
+export function MissionListPanel({ missions, onCreatePreset, onNewMission, onSelectMission, selectedMissionId }: MissionListPanelProps) {
   return (
     <aside className="flex h-full min-h-0 w-full flex-col gap-3 rounded-[28px] border border-neutral-200 bg-white p-4 shadow-[0_18px_60px_rgba(0,0,0,0.08)]">
       <button
@@ -32,6 +33,10 @@ export function MissionListPanel({ missions, onNewMission, onSelectMission, sele
         <Plus className="h-4 w-4" />
         New Mission
       </button>
+      <div className="grid grid-cols-2 gap-2">
+        <PresetButton onClick={() => onCreatePreset("MISSION_1")}>Mission 1</PresetButton>
+        <PresetButton onClick={() => onCreatePreset("MISSION_2")}>Mission 2</PresetButton>
+      </div>
 
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
         {missions.length === 0 ? (
@@ -72,5 +77,17 @@ export function MissionListPanel({ missions, onNewMission, onSelectMission, sele
         )}
       </div>
     </aside>
+  );
+}
+
+function PresetButton({ children, onClick }: { children: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="rounded-2xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.08em] text-neutral-700 transition hover:border-black hover:bg-white hover:text-black"
+    >
+      {children} Preset
+    </button>
   );
 }

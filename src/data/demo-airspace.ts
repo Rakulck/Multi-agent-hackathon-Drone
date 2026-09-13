@@ -17,7 +17,7 @@ export const AIRSPACE_DATA_SOURCE =
 export const UAS_FACILITY_MAP_CEILING_AGL_FT = 200;
 
 /** Planned cruise altitude used when checking corridor compliance (feet AGL). */
-export const PLANNED_CRUISE_AGL_FT = 400;
+export const PLANNED_CRUISE_AGL_FT = 190;
 
 export const airspaceSnapshotMeta = {
   airspaceClass: "Controlled" as const,
@@ -112,9 +112,9 @@ export const airspaceRouteCompliance: Record<
   { eligible: boolean; plannedAglFt: number; reason: string }
 > = {
   A: {
-    eligible: false,
+    eligible: true,
     plannedAglFt: PLANNED_CRUISE_AGL_FT,
-    reason: `Exceeds UASFM ceiling (${UAS_FACILITY_MAP_CEILING_AGL_FT} ft AGL) and intersects restricted dockside geofence.`,
+    reason: `Stays below the UASFM ceiling (${UAS_FACILITY_MAP_CEILING_AGL_FT} ft AGL); operator geofence requires live monitoring near the dockside corridor.`,
   },
   B: {
     eligible: true,

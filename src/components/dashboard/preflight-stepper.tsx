@@ -11,7 +11,7 @@ const stepLabels: Record<PreflightStepId, string> = {
   WEATHER: "Weather",
   AIRSPACE: "Airspace",
   MEMORY: "Memory",
-  ROUTES: "Routes",
+  ROUTES: "Route",
   APPROVAL: "Approval",
   READY: "Ready",
 };
@@ -22,6 +22,7 @@ const nodeClasses: Record<StepStatus, string> = {
   Completed: "bg-emerald-600 text-white",
   Warning: "bg-amber-500 text-white",
   Failed: "bg-red-600 text-white",
+  Approval: "bg-violet-600 text-white",
 };
 
 const connectorClasses: Record<StepStatus, string> = {
@@ -30,6 +31,7 @@ const connectorClasses: Record<StepStatus, string> = {
   Completed: "bg-emerald-500",
   Warning: "bg-amber-400",
   Failed: "bg-red-500",
+  Approval: "bg-violet-500",
 };
 
 interface PreflightStepperProps {

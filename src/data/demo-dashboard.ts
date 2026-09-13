@@ -76,14 +76,6 @@ export const fleetDrones: FleetDrone[] = [
   },
 ];
 
-export const weatherSnapshotData = {
-  windMph: 18,
-  gustMph: 21,
-  visibilityMiles: 10,
-  temperatureF: 64,
-  updatedAt: "08:32 AM",
-};
-
 export const routeLegend: RouteLegendItem[] = [
   { id: "A", name: "Route A", label: "Primary corridor", status: "candidate" },
   { id: "B", name: "Route B", label: "Courtyard approach", status: "warning" },
@@ -95,7 +87,7 @@ export const missionIntelligence: MissionIntelligence = {
   guardrails: [
     "Payload, battery, range, and availability checks will run deterministically.",
     "No autopilot, marketplace, pricing, or customer drone picker behavior.",
-    "External integrations remain inactive until server routes are implemented.",
+    "OpenWeather is fetched server-side; its result never overrides deterministic safety rules.",
   ],
   selectedDrone: "Pending deterministic evaluation",
   selectedRoute: "Pending route safety check",
@@ -119,7 +111,7 @@ export const timelineEvents: TimelineEvent[] = [
   {
     time: "--:--",
     title: "Integration events pending",
-    detail: "Airtable, Slack, Weather, and Gemini are server-only placeholders.",
+    detail: "Airtable, Slack, and Gemini remain unchanged while weather is evaluated server-side.",
     variant: "empty",
   },
 ];

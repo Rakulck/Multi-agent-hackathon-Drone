@@ -5,7 +5,7 @@ import {
   airspaceSnapshotMeta,
 } from "@/data/demo-airspace";
 import { apartmentDestination, craneHazard, dispatchOrigin, initialRouteStatuses } from "@/data/demo-routes";
-import { fleetDrones, weatherSnapshotData } from "@/data/demo-dashboard";
+import { fleetDrones } from "@/data/demo-dashboard";
 import { buildMissionMapScene, defaultMapScene } from "@/lib/map/route-warp";
 import type {
   AirspaceEval,
@@ -23,6 +23,7 @@ import type {
   IntegrationStatus,
   Mission,
   MissionMapScene,
+  MissionRun,
   MissionState,
   NewMissionInput,
   OperationalMemory,
@@ -31,6 +32,7 @@ import type {
   RouteId,
   RouteStatus,
   StepEvidence,
+  WeatherEvaluation,
   WeatherSnapshotData,
 } from "@/types/domain";
 import { preflightStepOrder } from "@/types/domain";
@@ -39,6 +41,25 @@ export const groceryOrder = {
   id: "ORDER-GROCERY-045",
   payloadKg: 4.5,
   destination: "Apartment delivery zone",
+};
+
+export const demoPresetInputs: Record<"MISSION_1" | "MISSION_2", NewMissionInput> = {
+  MISSION_1: {
+    deliveryType: "Grocery",
+    weightKg: 4.5,
+    pickup: "Grocery Hub",
+    drop: "Riverside Apartments",
+    priority: "Express",
+    dropOffPreference: "Courtyard",
+  },
+  MISSION_2: {
+    deliveryType: "Small Logistics",
+    weightKg: 5.5,
+    pickup: "Grocery Hub",
+    drop: "Riverside Apartments",
+    priority: "Critical",
+    dropOffPreference: "Primary entrance",
+  },
 };
 
 export const memoryStorageKey = "drone-fleet-intelligence.crane-memory";
@@ -214,7 +235,7 @@ export function waypointLabel(routes: DemoRoute[], routeId: RouteId | null, prog
   return `WP ${index} of ${route.waypoints.length} · Route ${routeId}`;
 }
 
-const MAX_INTEGRATION_EVENTS = 5;
+const MAX_INTEGRATION_EVENTS = 8;
 
 /**
  * Appends a new integration-flow placeholder event, marking any previously
@@ -315,7 +336,7 @@ export function buildMapSceneForInput(input: NewMissionInput): MissionMapScene {
   });
 }
 
-export function createMission(input: NewMissionInput): Mission {
+export function createMission(input: NewMissionInput, pattern: MissionRun = "MISSION_1"): Mission {
   missionCounter += 1;
 
   return {
@@ -324,12 +345,17 @@ export function createMission(input: NewMissionInput): Mission {
     createdAt: formatClockTime(new Date()),
     input,
     lifecycle: "NEW",
-    pattern: "MISSION_1",
+    pattern,
     steps: makeEmptyStepEvidence(),
     activeStepId: null,
     fleetEligibility: null,
     provisionalDrone: null,
     confirmedDrone: null,
+    weatherMode: "LIVE",
+    weatherFetchState: "IDLE",
+    weatherFetchMessage: null,
+    weather: null,
+    weatherEvaluation: null,
     cruiseSpeedMph: null,
     etaDeltaMin: 0,
     routeEval: null,
@@ -466,76 +492,101 @@ export function buildFleetStepEvidence(rows: FleetEvalRow[], weightKg: number): 
 /** STEP 3 — Evaluate Weather. */
 export function evaluateWeatherForDrones(rows: FleetEvalRow[], weather: WeatherSnapshotData) {
   const eligible = rows.filter((row) => row.eligible);
-  const withRisk = eligible.map((row) => ({ row, riskCandidate: weather.gustMph > row.drone.windLimitMph }));
-  const confirmedEntry = withRisk.find((entry) => !entry.riskCandidate) ?? withRisk[0] ?? null;
-  const reduction = confirmedEntry?.riskCandidate ? 6 : 4;
-  const cruiseSpeedMph = confirmedEntry ? BASE_CRUISE_SPEED_MPH - reduction : null;
-  const etaDeltaMin = confirmedEntry ? (confirmedEntry.riskCandidate ? 2 : 1) : 0;
+  const peakWindMph = Math.max(weather.windMph, weather.gustMph);
+  const droneEvaluations = eligible.map((row) => {
+    const accepted = weather.windMph <= row.drone.windLimitMph && weather.gustMph <= row.drone.windLimitMph;
+    const utilizationPercent = Math.round((peakWindMph / row.drone.windLimitMph) * 100);
+    return {
+      drone: row.drone,
+      accepted,
+      utilizationPercent,
+      reason: accepted
+        ? `${row.drone.model} accepted: ${weather.windMph} mph wind and ${weather.gustMph} mph gust are within its ${row.drone.windLimitMph} mph limit.`
+        : `${row.drone.model} rejected: ${weather.windMph} mph wind / ${weather.gustMph} mph gust exceeds its ${row.drone.windLimitMph} mph limit.`,
+    };
+  });
+  const accepted = droneEvaluations.filter((entry) => entry.accepted);
+  const confirmedEntry =
+    accepted.reduce<(typeof accepted)[number] | null>(
+      (best, entry) => (!best || entry.drone.windLimitMph > best.drone.windLimitMph ? entry : best),
+      null,
+    );
+  const utilization = confirmedEntry?.utilizationPercent ?? 100;
+  const moderate = Boolean(confirmedEntry && utilization >= 60);
+  const speedReductionMph = moderate ? (utilization >= 80 ? 6 : 4) : 0;
+  const cruiseSpeedMph = confirmedEntry ? BASE_CRUISE_SPEED_MPH - speedReductionMph : null;
+  const etaDeltaMin = moderate ? (utilization >= 80 ? 2 : 1) : 0;
+  const paused = confirmedEntry === null;
+  const severity: WeatherEvaluation["severity"] = paused ? "UNSAFE" : moderate ? "MODERATE" : "SAFE";
 
   return {
-    withRisk,
-    confirmed: confirmedEntry?.row.drone ?? null,
-    riskFlag: confirmedEntry?.riskCandidate ?? false,
+    droneEvaluations,
+    confirmedDrone: confirmedEntry?.drone ?? null,
+    severity,
     cruiseSpeedMph,
+    speedReductionMph,
     etaDeltaMin,
+    paused,
+    reason: paused
+      ? "Mission paused: current wind or gust exceeds every payload-eligible drone's certified limit."
+      : moderate
+        ? `${confirmedEntry.drone.model} has sufficient margin, but peak wind uses ${utilization}% of its limit; moderate-wind speed controls applied.`
+        : `${confirmedEntry.drone.model} has sufficient wind margin; no speed adjustment required.`,
   };
 }
 
 export function buildWeatherStepEvidence(params: {
   weather: WeatherSnapshotData;
-  withRisk: Array<{ row: FleetEvalRow; riskCandidate: boolean }>;
-  confirmed: FleetDrone | null;
-  riskFlag: boolean;
-  cruiseSpeedMph: number | null;
-  etaDeltaMin: number;
+  evaluation: WeatherEvaluation;
+  fetchState: Mission["weatherFetchState"];
+  fetchMessage: string;
 }): StepEvidence {
-  const { weather, withRisk, confirmed, riskFlag, cruiseSpeedMph, etaDeltaMin } = params;
-
-  const riskCandidates = withRisk.filter((entry) => entry.riskCandidate && entry.row.drone.model !== confirmed?.model);
-
-  const evaluation = withRisk.map(
-    (entry) =>
-      `${entry.row.drone.model} limit: ${entry.row.drone.windLimitMph} mph vs current gust ${weather.gustMph} mph — ${
-        entry.riskCandidate ? "risk candidate" : "within threshold"
-      }.`,
-  );
-
-  const decisionParts: string[] = [];
-  riskCandidates.forEach((entry) => {
-    decisionParts.push(`${entry.row.drone.model} becomes a weather-risk candidate because gusts exceed its preferred threshold.`);
-  });
-  if (confirmed) {
-    decisionParts.push(
-      riskFlag
-        ? `${confirmed.model} remains the only eligible drone; proceeding with reduced cruise speed.`
-        : `${confirmed.model} remains within its operating threshold. Confirmed.`,
-    );
-    decisionParts.push(`Reduce planned cruise speed from ${BASE_CRUISE_SPEED_MPH} mph to ${cruiseSpeedMph} mph.`);
-    decisionParts.push(`Increase ETA by ${etaDeltaMin} minute${etaDeltaMin === 1 ? "" : "s"}.`);
-  }
+  const { weather, evaluation, fetchState, fetchMessage } = params;
+  const adjusted = evaluation.speedReductionMph > 0;
+  const status =
+    evaluation.paused ? "Failed" : evaluation.severity === "MODERATE" || weather.dataSource === "DEMO_FALLBACK" ? "Warning" : "Completed";
 
   return {
     id: "WEATHER",
     title: stepTitles.WEATHER,
     input: [
+      `Weather received: ${fetchState} — ${fetchMessage}`,
+      `Data source: ${weather.dataSource}`,
+      `Pickup: ${weather.locations.pickup.windMph} mph wind, ${weather.locations.pickup.gustMph} mph gust`,
+      `Drop-off: ${weather.locations.dropOff.windMph} mph wind, ${weather.locations.dropOff.gustMph} mph gust`,
       `Wind: ${weather.windMph} mph`,
       `Gust: ${weather.gustMph} mph`,
+      `Direction: ${weather.windDirectionDeg}°`,
       `Visibility: ${weather.visibilityMiles} miles`,
       `Temperature: ${weather.temperatureF}°F`,
+      `Condition: ${weather.condition}`,
       `Last updated: ${weather.updatedAt}`,
     ],
-    evaluation,
-    decision: decisionParts.join(" "),
-    source: ["OpenWeather", "Deterministic Agent Rules"],
-    status: confirmed ? (riskFlag ? "Warning" : "Completed") : "Failed",
-    summary: confirmed
-      ? `${confirmed.model} confirmed. Cruise speed reduced to ${cruiseSpeedMph} mph.`
-      : "No eligible drone survives weather evaluation.",
+    evaluation: [
+      ...evaluation.droneEvaluations.map(
+        (entry) => `${entry.reason} Peak utilization: ${entry.utilizationPercent}%.`,
+      ),
+      adjusted
+        ? `Moderate wind adjustment: speed ${BASE_CRUISE_SPEED_MPH} → ${evaluation.cruiseSpeedMph} mph; ETA +${evaluation.etaDeltaMin} min.`
+        : evaluation.paused
+          ? "Speed/ETA adjustment: none; launch is paused."
+          : `Speed/ETA adjustment: none; ${BASE_CRUISE_SPEED_MPH} mph base cruise retained.`,
+      "Safety decision made by deterministic thresholds; Gemini cannot override it.",
+    ],
+    decision: `${evaluation.severity}: ${evaluation.reason}`,
+    source:
+      weather.dataSource === "LIVE"
+        ? ["OpenWeather LIVE", "Deterministic Safety Rules"]
+        : ["DEMO_FALLBACK (not live)", "Deterministic Safety Rules"],
+    status,
+    summary: evaluation.paused
+      ? "UNSAFE — mission paused; every eligible drone rejected."
+      : `${evaluation.severity} — ${evaluation.confirmedDrone?.model ?? "No drone"} confirmed at ${evaluation.cruiseSpeedMph} mph.`,
   };
 }
 
 /** STEP 4 — Airspace Compliance. */
-export function evaluateAirspaceForMission(): AirspaceEval {
+export function evaluateAirspaceForMission(selectedRoute: RouteId | null = null): AirspaceEval {
   const routeResults: AirspaceRouteResult[] = (["A", "B", "C"] as RouteId[]).map((id) => {
     const compliance = airspaceRouteCompliance[id];
     return {
@@ -548,7 +599,7 @@ export function evaluateAirspaceForMission(): AirspaceEval {
   });
 
   const eligible = routeResults.filter((row) => row.eligible).map((row) => row.name);
-  const preferred = airspacePreferredRoute;
+  const preferred = selectedRoute && routeResults.some((row) => row.id === selectedRoute && row.eligible) ? selectedRoute : airspacePreferredRoute;
 
   return {
     airspaceClass: airspaceSnapshotMeta.airspaceClass,
@@ -561,7 +612,7 @@ export function evaluateAirspaceForMission(): AirspaceEval {
     dataSource: airspaceSnapshotMeta.dataSource,
     timestamp: airspaceSnapshotMeta.updatedAt,
     facilityMapGrid: airspaceSnapshotMeta.facilityMapGrid,
-    decision: `Route A exceeds the permitted corridor. ${eligible.join(" and ")} remain eligible. Route ${preferred} selected.`,
+    decision: `${eligible.join(", ")} pass the published ceiling and geofence rules. Route ${preferred} remains eligible in controlled airspace with mock LAANC authorization still required.`,
   };
 }
 
@@ -814,7 +865,12 @@ export function isApprovalRequired(rows: RouteEvalRow[] | null): boolean {
   return rows.every((row) => row.status === "blocked");
 }
 
-export function buildApprovalStepEvidence(required: boolean): StepEvidence {
+export function buildApprovalStepEvidence(required: boolean, weather: WeatherEvaluation | null): StepEvidence {
+  const weatherCheck =
+    weather?.severity === "MODERATE"
+      ? `Weather moderate: deterministic ${weather.cruiseSpeedMph} mph speed and +${weather.etaDeltaMin} min ETA controls already applied.`
+      : "Weather safely below the confirmed drone's limit.";
+
   return {
     id: "APPROVAL",
     title: stepTitles.APPROVAL,
@@ -827,7 +883,7 @@ export function buildApprovalStepEvidence(required: boolean): StepEvidence {
     evaluation: [
       "All routes blocked? No.",
       "Obstacle confidence low? No.",
-      "Weather near or above safety limits? No.",
+      weatherCheck,
       "Battery reserve uncertain? No.",
       "Required safety data unavailable? No.",
       "Primary and alternate drop-off zones blocked? No.",
@@ -836,7 +892,7 @@ export function buildApprovalStepEvidence(required: boolean): StepEvidence {
       ? "Human approval required before launch. Operator notified via Slack."
       : "No human approval required. All deterministic safety checks passed.",
     source: required ? ["Agent", "Slack"] : ["Agent", "Slack marked as Standby"],
-    status: required ? "Warning" : "Completed",
+    status: required ? "Approval" : "Completed",
     summary: required ? "Waiting for operator decision." : "Autonomous launch approved.",
   };
 }
@@ -897,4 +953,3 @@ export function formatTimestampShort(value: string) {
   return value.replace("T", " ").replace(".000Z", " UTC");
 }
 
-export const defaultWeatherSnapshot: WeatherSnapshotData = weatherSnapshotData;

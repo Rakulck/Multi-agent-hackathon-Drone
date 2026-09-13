@@ -32,6 +32,8 @@ import type {
   RouteId,
   RouteStatus,
   StepStatus,
+  WeatherEvaluation,
+  WeatherSnapshotData,
 } from "@/types/domain";
 
 interface LiveMissionTabProps {
@@ -56,9 +58,12 @@ interface LiveMissionTabProps {
   onToggleConnection: () => void;
   routeProgress: number;
   routeStatuses: Record<RouteId, RouteStatus>;
+  plannedSpeedMph: number | null;
   selectedDrone: string;
   selectedRoute: RouteId | null;
   slackNotified: boolean;
+  weather: WeatherSnapshotData | null;
+  weatherEvaluation: WeatherEvaluation | null;
 }
 
 export function LiveMissionTab({
@@ -83,12 +88,16 @@ export function LiveMissionTab({
   onToggleConnection,
   routeProgress,
   routeStatuses,
+  plannedSpeedMph,
   selectedDrone,
   selectedRoute,
   slackNotified,
+  weather,
+  weatherEvaluation,
 }: LiveMissionTabProps) {
   const flightMode = deriveFlightMode({ status: currentStatus, progress: routeProgress, override: flightModeOverride });
-  const speedKmh = speedForFlightMode(flightMode);
+  const plannedSpeedKmh = plannedSpeedMph ? Math.round(plannedSpeedMph * 1.60934) : null;
+  const speedKmh = flightMode === "CRUISE" || flightMode === "APPROACH" || flightMode === "TAKEOFF" ? (plannedSpeedKmh ?? speedForFlightMode(flightMode)) : speedForFlightMode(flightMode);
   const connectionHealth = connectionHealthForFlightMode(flightMode);
   const routeLegend = makeRouteLegend(routeStatuses, mapScene.routes);
   const waypoint = computeWaypointLabel(mapScene.routes, selectedRoute, routeProgress);
@@ -96,7 +105,7 @@ export function LiveMissionTab({
   const batteryPercent = liveBattery ?? activeDrone?.batteryPercent ?? 0;
   const decision = getLiveDecisionParts(currentStatus, activeMission, memory, approval, flightMode, commandLog[0] ?? null);
   const decisionStatus: StepStatus = approval
-    ? "Warning"
+    ? "Approval"
     : currentStatus === "OBSTACLE DETECTED"
       ? "Warning"
       : currentStatus === "DELIVERED"
@@ -140,6 +149,34 @@ export function LiveMissionTab({
               {selectedDrone}
             </span>
           </div>
+          {weather && weatherEvaluation ? (
+            <div className="mt-2 rounded-2xl bg-neutral-50 px-3 py-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span
+                  className={cn(
+                    "rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.1em]",
+                    weather.dataSource === "LIVE"
+                      ? "bg-emerald-100 text-emerald-700"
+                      : "bg-amber-100 text-amber-700",
+                  )}
+                >
+                  Weather: {weather.dataSource}
+                </span>
+                <span className="text-[10px] font-bold text-neutral-700">
+                  {weatherEvaluation.severity} · {weather.condition}
+                </span>
+              </div>
+              <p className="mt-1 text-[10px] font-medium leading-snug text-neutral-600">
+                {weather.windMph} mph wind / {weather.gustMph} mph gust · {weather.windDirectionDeg}° ·{" "}
+                {weather.temperatureF}°F · {weather.visibilityMiles} mi visibility
+              </p>
+              <p className="mt-0.5 text-[10px] font-semibold text-black">
+                {weatherEvaluation.speedReductionMph > 0
+                  ? `Weather adjustment active: ${weatherEvaluation.cruiseSpeedMph} mph, ETA +${weatherEvaluation.etaDeltaMin} min`
+                  : `No weather adjustment: ${weatherEvaluation.cruiseSpeedMph} mph planned speed`}
+              </p>
+            </div>
+          ) : null}
         </div>
 
         <LiveDroneState
@@ -263,11 +300,20 @@ function getLiveDecisionParts(
     };
   }
 
+  if (status === "MEMORY SAVED") {
+    return {
+      input: "Verified obstacle record with route, altitude band, confidence, and expiry.",
+      evaluation: `${memory?.id ?? "MEM-CRANE-001"} stored for cross-vendor reuse before selecting the alternate corridor.`,
+      decision: `Save structured memory and mark Route A blocked.${commandSuffix}`,
+      source: ["Airtable", "Agent"],
+    };
+  }
+
   if (status === "REROUTING") {
     return {
       input: "Alternate route candidates evaluated.",
       evaluation: `${memory?.id ?? "MEM-CRANE-001"} confirms Route A remains unsafe.`,
-      decision: `Locking in Route C.${commandSuffix}`,
+      decision: activeMission === "MISSION_2" ? `Changing altitude inside Route C corridor.${commandSuffix}` : `Locking in Route C.${commandSuffix}`,
       source: ["Agent", "Google Maps 3D"],
     };
   }

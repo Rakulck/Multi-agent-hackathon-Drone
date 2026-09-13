@@ -7,18 +7,20 @@ import { MissionListPanel } from "@/components/dashboard/mission-list-panel";
 import { PreflightStepper } from "@/components/dashboard/preflight-stepper";
 import { StepEvidenceCard, StepHistoryRow } from "@/components/dashboard/step-evidence-card";
 import { ApprovedPlanCard } from "@/components/dashboard/approved-plan-card";
-import type { Mission, PreflightStepId, StepStatus } from "@/types/domain";
+import type { Mission, PreflightStepId, StepStatus, WeatherMode } from "@/types/domain";
 
 interface MissionPlanningTabProps {
   isLaunching: boolean;
   isRunningPreflight: boolean;
   missions: Mission[];
+  onCreatePreset: (pattern: Mission["pattern"]) => void;
   onLaunchMission: () => void;
   onNewMission: () => void;
   onNextStep: () => void;
   onReset: () => void;
   onRunPreflight: () => void;
   onSelectMission: (id: string) => void;
+  onWeatherModeChange: (mode: WeatherMode) => void;
   selectedMission: Mission | null;
 }
 
@@ -26,12 +28,14 @@ export function MissionPlanningTab({
   isLaunching,
   isRunningPreflight,
   missions,
+  onCreatePreset,
   onLaunchMission,
   onNewMission,
   onNextStep,
   onReset,
   onRunPreflight,
   onSelectMission,
+  onWeatherModeChange,
   selectedMission,
 }: MissionPlanningTabProps) {
   const summary = buildSummaryItems(selectedMission);
@@ -58,11 +62,14 @@ export function MissionPlanningTab({
     Boolean(activeStep) &&
     activeStep?.status !== "Waiting" &&
     activeStep?.status !== "Evaluating";
+  const canChangeWeatherMode =
+    Boolean(selectedMission) && selectedMission?.steps.WEATHER.status === "Waiting" && !isRunningPreflight;
 
   return (
     <section className="grid min-h-0 flex-1 grid-cols-[22%_78%] gap-3">
       <MissionListPanel
         missions={missions}
+        onCreatePreset={onCreatePreset}
         onNewMission={onNewMission}
         onSelectMission={onSelectMission}
         selectedMissionId={selectedMission?.id ?? null}
@@ -71,10 +78,12 @@ export function MissionPlanningTab({
       <div className="flex min-h-0 flex-col gap-3">
         <SummaryRow items={summary} />
 
-        <div className="flex shrink-0 items-center gap-2">
-          <div className="min-w-0 flex-1">
-            <PreflightStepper statuses={stepStatuses} />
-          </div>
+        <div className="flex shrink-0 items-center justify-between gap-2">
+          <WeatherModeControl
+            disabled={!canChangeWeatherMode}
+            mode={selectedMission?.weatherMode ?? "LIVE"}
+            onChange={onWeatherModeChange}
+          />
           <button
             type="button"
             disabled={!canRunPreflight}
@@ -98,6 +107,8 @@ export function MissionPlanningTab({
             Reset
           </button>
         </div>
+
+        <PreflightStepper statuses={stepStatuses} />
 
         <div className="flex min-h-0 flex-1 flex-col gap-2.5">
           {!selectedMission ? (
@@ -130,6 +141,46 @@ export function MissionPlanningTab({
         />
       </div>
     </section>
+  );
+}
+
+const weatherModes: Array<{ id: WeatherMode; label: string }> = [
+  { id: "LIVE", label: "Live" },
+  { id: "SAFE", label: "Safe" },
+  { id: "MODERATE", label: "Moderate" },
+  { id: "UNSAFE", label: "Unsafe" },
+];
+
+function WeatherModeControl({
+  disabled,
+  mode,
+  onChange,
+}: {
+  disabled: boolean;
+  mode: WeatherMode;
+  onChange: (mode: WeatherMode) => void;
+}) {
+  return (
+    <div className="flex items-center gap-2 rounded-2xl border border-neutral-200 bg-white p-1.5">
+      <span className="pl-2 text-[10px] font-bold uppercase tracking-[0.14em] text-neutral-500">Weather</span>
+      <div className="flex items-center gap-1 rounded-xl bg-neutral-100 p-1">
+        {weatherModes.map((option) => (
+          <button
+            key={option.id}
+            type="button"
+            disabled={disabled}
+            onClick={() => onChange(option.id)}
+            className={cn(
+              "rounded-lg px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-[0.08em] transition",
+              mode === option.id ? "bg-black text-white shadow-sm" : "text-neutral-500 hover:bg-white hover:text-black",
+              disabled && "cursor-not-allowed opacity-50",
+            )}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 

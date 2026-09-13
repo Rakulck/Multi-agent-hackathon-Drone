@@ -256,16 +256,16 @@ export const preflightStepOrder = [
   "REQUEST",
   "FLEET",
   "WEATHER",
+  "ROUTES",
   "AIRSPACE",
   "MEMORY",
-  "ROUTES",
   "APPROVAL",
   "READY",
 ] as const;
 
 export type PreflightStepId = (typeof preflightStepOrder)[number];
 
-export type StepStatus = "Waiting" | "Evaluating" | "Completed" | "Warning" | "Failed";
+export type StepStatus = "Waiting" | "Evaluating" | "Completed" | "Warning" | "Failed" | "Approval";
 
 export interface StepEvidence {
   id: PreflightStepId;
@@ -298,9 +298,65 @@ export interface RouteEvalRow {
 export interface WeatherSnapshotData {
   windMph: number;
   gustMph: number;
+  windDirectionDeg: number;
   visibilityMiles: number;
   temperatureF: number;
+  condition: string;
   updatedAt: string;
+  dataSource: WeatherDataSource;
+  locations: {
+    pickup: WeatherLocationSnapshot;
+    dropOff: WeatherLocationSnapshot;
+  };
+}
+
+export type WeatherDataSource = "LIVE" | "DEMO_FALLBACK";
+
+export type WeatherMode = "LIVE" | "SAFE" | "MODERATE" | "UNSAFE";
+
+export type WeatherFetchState =
+  | "IDLE"
+  | "LOADING"
+  | "SUCCESS"
+  | "TIMEOUT"
+  | "INVALID_RESPONSE"
+  | "MISSING_API_KEY"
+  | "RATE_LIMIT"
+  | "API_FAILURE";
+
+export interface WeatherLocationSnapshot {
+  label: "Pickup" | "Drop-off";
+  windMph: number;
+  gustMph: number;
+  windDirectionDeg: number;
+  visibilityMiles: number;
+  temperatureF: number;
+  condition: string;
+  timestamp: string;
+}
+
+export interface WeatherResponse {
+  status: Exclude<WeatherFetchState, "IDLE" | "LOADING">;
+  weather: WeatherSnapshotData;
+  message: string;
+}
+
+export interface WeatherDroneEvaluation {
+  drone: FleetDrone;
+  accepted: boolean;
+  utilizationPercent: number;
+  reason: string;
+}
+
+export interface WeatherEvaluation {
+  droneEvaluations: WeatherDroneEvaluation[];
+  confirmedDrone: FleetDrone | null;
+  severity: "SAFE" | "MODERATE" | "UNSAFE";
+  cruiseSpeedMph: number | null;
+  speedReductionMph: number;
+  etaDeltaMin: number;
+  paused: boolean;
+  reason: string;
 }
 
 export type AirspaceClass = "Controlled" | "Uncontrolled";
@@ -366,6 +422,11 @@ export interface Mission {
   fleetEligibility: FleetEvalRow[] | null;
   provisionalDrone: string | null;
   confirmedDrone: string | null;
+  weatherMode: WeatherMode;
+  weatherFetchState: WeatherFetchState;
+  weatherFetchMessage: string | null;
+  weather: WeatherSnapshotData | null;
+  weatherEvaluation: WeatherEvaluation | null;
   cruiseSpeedMph: number | null;
   etaDeltaMin: number;
   routeEval: RouteEvalRow[] | null;
